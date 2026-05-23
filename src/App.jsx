@@ -2899,14 +2899,7 @@ function EventScanner({ upEvent }) {
     if (!url) return;
     setScanning(true); setScanError(null); setScanDone(false); setMultiOptions(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          system: `You are an assistant that extracts structured running event information from a webpage.
+      const SYSTEM = `You are an assistant that extracts structured running event information from a webpage.
 You MUST respond with ONLY a JSON object — no preamble, no markdown fences, no explanation.
 
 If the page contains MULTIPLE race distances (e.g. 10km, 21km, 50km, 100km options), return:
@@ -2922,9 +2915,7 @@ If the page contains MULTIPLE race distances (e.g. 10km, 21km, 50km, 100km optio
       "name": "Race Name 50km",
       "date": "YYYY-MM-DD",
       "location": "City, Country",
-      "aidStations": [
-        { "name": "Station Name", "km": 23, "drop": true }
-      ]
+      "aidStations": [{ "name": "Station Name", "km": 23, "drop": true }]
     }
   ]
 }
@@ -2936,31 +2927,73 @@ If there is only ONE distance, return:
   "date": "YYYY-MM-DD",
   "distance": "numeric km as a string e.g. 42.2",
   "location": "City, State/Country",
-  "type": "trail" | "road" | "mixed",
-  "elevationM": numeric metres of total elevation gain or 0,
+  "type": "trail or road or mixed",
+  "elevationM": 0,
   "trailType": "1-2 sentence description of terrain and course character",
   "goalTime": null,
-  "aidStations": [
-    { "name": "Station Name", "km": 23, "drop": true }
-  ]
+  "aidStations": [{ "name": "Station Name", "km": 23, "drop": true }]
 }
 
-For aidStations: list each checkpoint in order by km. "km" is the distance from the start. "drop" is true if the event page mentions it as a drop bag point. If no aid station info is found, return an empty array []. For road races with no meaningful aid station data return [].`,
+For aidStations: list each in order by km from start. drop=true if it is a drop bag point. Return [] if none found.`;
+
+      // Try URL document source first (server-side fetch, no CORS)
+      const body = {
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        system: SYSTEM,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: "Extract the running event information from this webpage and return JSON:" },
+            { type: "document", source: { type: "url", url } },
+          ],
+        }],
+      };
+
+      let res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      let d = await res.json();
+
+      // If url document source fails (not all deployments support it),
+      // fall back to asking Claude to use its knowledge of the event
+      if (!res.ok || !d.content?.length) {
+        const fallbackBody = {
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          system: SYSTEM,
           messages: [{
             role: "user",
-            content: `Search for and read this running event page, then return the structured JSON:\n${url}`
+            content: `Look up this running event URL and extract the information. URL: ${url}\n\nReturn only the JSON.`,
           }],
-        }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d?.error?.message || "API error");
+        };
+        res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fallbackBody),
+        });
+        d = await res.json();
+      }
+
+      if (!res.ok) {
+        const msg = d?.error?.message || JSON.stringify(d?.error) || `HTTP ${res.status}`;
+        throw new Error(`API error: ${msg}`);
+      }
+
       const text = (d.content || [])
         .map(b => b.type === "text" ? b.text : "")
         .join("\n")
         .replace(/```json|```/g, "")
         .trim();
+
+      if (!text) throw new Error(`No text in API response. Block types: ${(d.content||[]).map(b=>b.type).join(", ")}`);
+
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("Couldn't read the event page — try filling in manually");
+      if (!jsonMatch) throw new Error(`Couldn't find JSON. Response started with: ${text.slice(0,100)}`);
+
       const parsed = JSON.parse(jsonMatch[0]);
       if (parsed.multiple && parsed.variants?.length > 1) {
         setMultiOptions(parsed.variants);
