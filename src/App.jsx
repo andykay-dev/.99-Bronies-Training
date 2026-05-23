@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useForm } from "@formspree/react";
+import { Analytics } from "@vercel/analytics/react";
 
 // ════════════════════════════════════════════════════════════
 //  .99 TRAINING
@@ -4049,6 +4050,7 @@ export default function App() {
           {toast}
         </div>
       )}
+      <Analytics />
     </>
   );
 }
