@@ -939,21 +939,41 @@ function buildEventPlan(profile, event, dayPlan, fb) {
   const maxLong     = longRunCap(isTrail, distNum, paces.ep);
   const peakWeeks   = peakLongRunWeeks(distNum, trainingWks);
 
-  // For plans with 2+ peak long runs, the weeks BETWEEN peaks are "down weeks"
-  // with a shorter long run (65% of the surrounding peak) for recovery.
-  // We identify those inter-peak weeks explicitly.
+  // ── Down week identification ─────────────────────────────
+  // Rules:
+  // 1. Every 3rd build week is a routine down week (load management)
+  // 2. Any week BETWEEN two peak weeks is a down week (inter-peak recovery)
+  // 3. The week IMMEDIATELY AFTER every peak long run is always a down week
+  //    — you never go straight from a peak into another big effort
+  // 4. Taper and race weeks are never flagged as down weeks (handled separately)
+
   const interPeakDownWeeks = new Set();
+  const postPeakDownWeeks  = new Set();
+
   if (peakWeeks.length >= 2) {
     for (let pi = 0; pi < peakWeeks.length - 1; pi++) {
-      const between = peakWeeks[pi + 1] - peakWeeks[pi];
-      if (between >= 2) {
-        // Mark the week(s) directly between the two peak weeks as down weeks
-        for (let w = peakWeeks[pi] + 1; w < peakWeeks[pi + 1]; w++) {
-          interPeakDownWeeks.add(w);
-        }
+      const peakA = peakWeeks[pi];
+      const peakB = peakWeeks[pi + 1];
+      // All weeks between the two peaks are down weeks
+      for (let w = peakA + 1; w < peakB; w++) {
+        interPeakDownWeeks.add(w);
       }
     }
   }
+
+  // Week after every peak (except the last peak which leads into taper)
+  peakWeeks.forEach((pw, i) => {
+    const afterPeak = pw + 1;
+    const isLastPeak = i === peakWeeks.length - 1;
+    // Don't mark as down if it's already a peak, taper, or race week
+    if (!isLastPeak && !peakWeeks.includes(afterPeak)) {
+      postPeakDownWeeks.add(afterPeak);
+    }
+    // Last peak: the week after is always a down/recovery week before taper
+    if (isLastPeak && !peakWeeks.includes(afterPeak)) {
+      postPeakDownWeeks.add(afterPeak);
+    }
+  });
 
   let cumulativeAdj = 0;
 
@@ -976,8 +996,16 @@ function buildEventPlan(profile, event, dayPlan, fb) {
     if (prevFb === "ok")       cumulativeAdj = Math.max(0, cumulativeAdj * 0.5);
     const fbAdj = Math.max(-6, Math.min(8, cumulativeAdj));
 
-    const isPeakLong = peakWeeks.includes(wn);
-    const isInterPeakDown = interPeakDownWeeks.has(wn);
+    const isPeakLong       = peakWeeks.includes(wn);
+    const isInterPeakDown  = interPeakDownWeeks.has(wn);
+    const isPostPeakDown   = postPeakDownWeeks.has(wn);
+    const isAnyRecovery    = isInterPeakDown || isPostPeakDown;
+
+    // A week is "down" if: every-3rd-week cycle, inter-peak, or post-peak
+    const isDown = (
+      ((wn % 3 === 0) && !["TAPER","RACE","PEAK"].includes(phase) && !isPeakLong)
+      || isAnyRecovery
+    );
 
     // ── Race week: special structure ───────────────────────
     if (isRaceWk) {
@@ -1010,8 +1038,8 @@ function buildEventPlan(profile, event, dayPlan, fb) {
         ? (peakIdx === 1 ? 1.00 : peakIdx === 0 ? 0.95 : 0.97)
         : (peakIdx === 0 ? 0.95 : peakIdx === 1 ? 1.00 : 0.98);
       longKm = Math.round(maxLong * mult);
-    } else if (isInterPeakDown) {
-      // Recovery long run between two peak weeks — 65% of max long run
+    } else if (isAnyRecovery) {
+      // Recovery week after or between peaks — 65% of max, min 40% of race dist
       longKm = Math.max(minRecovery, Math.round(maxLong * 0.65));
     } else if (isTaper) {
       longKm = taperWkIdx <= 1 ? Math.round(maxLong * 0.60) : Math.round(maxLong * 0.38);
@@ -1041,16 +1069,19 @@ function buildEventPlan(profile, event, dayPlan, fb) {
     );
 
     // Week label: "Build" normally, "Down" for recovery weeks, labelled for peak
-    const weekLabel = isPeakLong ? "Peak Long Run"
-      : isInterPeakDown ? "Down Week"
-      : isDown ? "Down Week"
-      : isTaper ? "Taper"
+    const weekLabel = isPeakLong    ? "Peak Long Run"
+      : isPostPeakDown               ? "Recovery Week"
+      : isInterPeakDown              ? "Down Week"
+      : isDown                       ? "Down Week"
+      : isTaper                      ? "Taper"
       : "Build";
 
-    const note = isInterPeakDown
+    const note = isPostPeakDown
+      ? "⬇ Recovery week — you just did a peak long run. Shorter long run, protect the legs before the next big effort."
+      : isInterPeakDown
       ? "⬇ Down week — shorter long run between peaks. Let the big efforts absorb."
       : isDown
-      ? "⬇ Recovery week — protect the gains."
+      ? "⬇ Down week — protect the gains."
       : isTaper && taperWkIdx === 1
       ? "📉 Taper begins — volume drops but intensity stays."
       : isTaper && taperWkIdx >= 2
@@ -1061,7 +1092,7 @@ function buildEventPlan(profile, event, dayPlan, fb) {
 
     const longSession = Object.values(sessions).find(s => s?.wtype === "long");
     return {
-      weekNum: wn, phase, startDate, isDown, isPeakLong, weekLabel,
+      weekNum: wn, phase, startDate, isDown, isPeakLong, isPostPeakDown, weekLabel,
       sessions, totalKm, note,
       longRunMins: longSession?.estMins || 0,
     };
@@ -2403,7 +2434,7 @@ function DayPlanPicker({ value, onChange }) {
                   const m = SLOT_TYPES[k];
                   const isStrengthBtn = k === "strength";
                   const active   = isStrengthBtn ? strengthOn : current.includes(k);
-                  const disabled = isStrengthBtn && primary === "rest" && !strengthOn;
+                  const disabled = false; // strength always toggleable
                   return (
                     <React.Fragment key={k}>
                       {isStrengthBtn && <div style={{width:1,background:"var(--rule)",alignSelf:"stretch",margin:"0 2px"}}/>}
