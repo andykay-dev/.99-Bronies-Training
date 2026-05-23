@@ -115,8 +115,14 @@ const G = ({ skin }) => {
 
       /* ── Base styles (shared) ── */
       html,body{background:var(--bg);font-family:var(--sans);color:var(--ink);
-        -webkit-text-size-adjust:100%;text-size-adjust:100%;transition:background .3s,color .3s;}
+        -webkit-text-size-adjust:100%;text-size-adjust:100%;transition:background .3s,color .3s;
+        font-size:14px;}
       input,select,textarea,button{font-family:var(--sans);}
+
+      /* Tighten layout on very small screens (iPhone SE etc.) */
+      @media (max-width: 374px) {
+        :root{ --pad-x:10px; --pad-x-tight:8px; }
+      }
 
       @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
       @keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-6px)}30%{transform:translateX(6px)}45%{transform:translateX(-5px)}60%{transform:translateX(5px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}
@@ -239,18 +245,19 @@ const G = ({ skin }) => {
 // UTC-offset drift when comparing dates.
 
 function todaySydney() {
-  // Returns a plain Date whose year/month/day match Sydney wall-clock today,
-  // with hours zeroed out (in the local runtime timezone — doesn't matter
-  // because we only ever compare dates by their date parts).
+  // Returns a plain Date whose year/month/day match Sydney wall-clock today.
+  // We use Intl to get the Sydney date parts, then construct via new Date(y,m,d)
+  // (NOT via a string like "2025-05-24T00:00:00" which would be parsed as local
+  // time on some engines and UTC on others — the Date constructor with numeric
+  // parts is always unambiguously local midnight).
   const parts = new Intl.DateTimeFormat("en-AU", {
     timeZone: "Australia/Sydney",
     year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(new Date());
-  const y = parts.find(p => p.type === "year").value;
-  const m = parts.find(p => p.type === "month").value;
-  const d = parts.find(p => p.type === "day").value;
-  // Build a plain local midnight Date — no timezone math, just date parts
-  return new Date(`${y}-${m}-${d}T00:00:00`);
+  const y = parseInt(parts.find(p => p.type === "year").value, 10);
+  const m = parseInt(parts.find(p => p.type === "month").value, 10) - 1; // 0-indexed
+  const d = parseInt(parts.find(p => p.type === "day").value, 10);
+  return new Date(y, m, d, 0, 0, 0, 0);
 }
 
 const TODAY = todaySydney();
@@ -271,10 +278,9 @@ const PRIORITY = {
 };
 
 const TRAINING_GOALS = [
-  { value:"goal_event", label:"Training for an Event",   desc:"I have a race I'm preparing for",   mult:1.00 },
-  { value:"healthier",  label:"Getting Healthier",        desc:"Building a habit, feeling better",  mult:0.70 },
-  { value:"returning",  label:"Getting Back Into It",     desc:"Returning after a break or injury", mult:0.78 },
-  { value:"hangout",    label:"Coffee With the Boys",     desc:"Here for the vibes — no pressure",  mult:0.55 },
+  { value:"goal_event", label:"Training for an Event",              desc:"I have a race I'm preparing for",                    mult:1.00 },
+  { value:"healthier",  label:"Get me back to being a Healthy Bronie", desc:"Building habits, getting fitter — no pressure",   mult:0.74 },
+  { value:"hangout",    label:"Coffee With the Boys",               desc:"Here for the vibes — no pressure",                  mult:0.55 },
 ];
 
 const RACE_DISTANCES = [
@@ -298,21 +304,23 @@ const DAYS = [
 
 // Session slot types — what kind of run goes on a given day
 const SLOT_TYPES = {
-  workout: { label:"Workout",  icon:"⚡", color:"#7a4f00",
-             desc:"Intervals, tempo, hills, fartlek" },
-  easy:    { label:"Easy Run", icon:"🦶", color:"#1a56db",
-             desc:"Conversational pace, recovery" },
-  long:    { label:"Long Run", icon:"🏔", color:"#5b2d8e",
-             desc:"Time on feet — the cornerstone session" },
-  bronies: { label:"BRONIES",  icon:"☕", color:"#1a472a",
-             desc:"The 7.99km Bronie social run — coffee after" },
-  rest:    { label:"Rest",     icon:"💤", color:"#9a9a9a",
-             desc:"Recovery — protect the gains" },
+  workout:   { label:"Workout",           icon:"⚡", color:"#7a4f00",
+               desc:"Intervals, tempo, hills, fartlek" },
+  easy:      { label:"Easy Run",          icon:"🦶", color:"#1a56db",
+               desc:"Conversational pace, recovery" },
+  long:      { label:"Long Run",          icon:"🏔", color:"#5b2d8e",
+               desc:"Time on feet — the cornerstone session" },
+  bronies:   { label:"BRONIES",           icon:"☕", color:"#1a472a",
+               desc:"The 7.99km Bronie social run — coffee after" },
+  strength:  { label:"Strength Training", icon:"🏋", color:"#8B0000",
+               desc:"Chat to the Bronies about what you SHOULD be doing" },
+  rest:      { label:"Rest",              icon:"💤", color:"#9a9a9a",
+               desc:"Recovery — protect the gains" },
 };
 
 const DEFAULT_DAY_PLAN = {
-  mon:"workout", tue:"rest", wed:"bronies", thu:"easy",
-  fri:"bronies", sat:"long", sun:"easy",
+  mon:"rest", tue:"rest", wed:"bronies", thu:"rest",
+  fri:"bronies", sat:"long", sun:"rest",
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -902,12 +910,31 @@ function buildEventPlan(profile, event, dayPlan, fb) {
   const maxLong     = longRunCap(isTrail, distNum, paces.ep);
   const peakWeeks   = peakLongRunWeeks(distNum, trainingWks);
 
+  // For plans with 2+ peak long runs, the weeks BETWEEN peaks are "down weeks"
+  // with a shorter long run (65% of the surrounding peak) for recovery.
+  // We identify those inter-peak weeks explicitly.
+  const interPeakDownWeeks = new Set();
+  if (peakWeeks.length >= 2) {
+    for (let pi = 0; pi < peakWeeks.length - 1; pi++) {
+      const between = peakWeeks[pi + 1] - peakWeeks[pi];
+      if (between >= 2) {
+        // Mark the week(s) directly between the two peak weeks as down weeks
+        for (let w = peakWeeks[pi] + 1; w < peakWeeks[pi + 1]; w++) {
+          interPeakDownWeeks.add(w);
+        }
+      }
+    }
+  }
+
   let cumulativeAdj = 0;
 
   return Array.from({ length: total }, (_, i) => {
     const wn         = i + 1;
     const phase      = getPhase(wn, total);
-    const isDown     = (wn % 3 === 0) && !["TAPER","RACE","PEAK"].includes(phase);
+    // A week is a "down week" if it's every 3rd week (build cycle recovery),
+    // OR if it falls between two peak long run weeks.
+    const isDown     = ((wn % 3 === 0) && !["TAPER","RACE","PEAK"].includes(phase))
+                    || interPeakDownWeeks.has(wn);
     const isTaper    = phase === "TAPER";
     const isRaceWk   = phase === "RACE";
     const pct        = wn / trainingWks;
@@ -921,6 +948,7 @@ function buildEventPlan(profile, event, dayPlan, fb) {
     const fbAdj = Math.max(-6, Math.min(8, cumulativeAdj));
 
     const isPeakLong = peakWeeks.includes(wn);
+    const isInterPeakDown = interPeakDownWeeks.has(wn);
 
     // ── Race week: special structure ───────────────────────
     if (isRaceWk) {
@@ -935,6 +963,7 @@ function buildEventPlan(profile, event, dayPlan, fb) {
 
       return {
         weekNum: wn, phase, startDate, isDown: false, isRaceWeek: true, isPeakLong: false,
+        weekLabel: "Race Week",
         sessions,
         totalKm: Math.round(sessions.mon.distance + sessions.wed.distance + (parseFloat(event.distance) || 0)),
         longRunMins: 0,
@@ -952,6 +981,9 @@ function buildEventPlan(profile, event, dayPlan, fb) {
         ? (peakIdx === 1 ? 1.00 : peakIdx === 0 ? 0.95 : 0.97)
         : (peakIdx === 0 ? 0.95 : peakIdx === 1 ? 1.00 : 0.98);
       longKm = Math.round(maxLong * mult);
+    } else if (isInterPeakDown) {
+      // Recovery long run between two peak weeks — 65% of max long run
+      longKm = Math.max(minRecovery, Math.round(maxLong * 0.65));
     } else if (isTaper) {
       longKm = taperWkIdx <= 1 ? Math.round(maxLong * 0.60) : Math.round(maxLong * 0.38);
     } else if (isDown) {
@@ -979,7 +1011,16 @@ function buildEventPlan(profile, event, dayPlan, fb) {
       DAYS.reduce((sum, d) => sum + (sessions[d.id]?.distance || 0), 0)
     );
 
-    const note = isDown
+    // Week label: "Build" normally, "Down" for recovery weeks, labelled for peak
+    const weekLabel = isPeakLong ? "Peak Long Run"
+      : isInterPeakDown ? "Down Week"
+      : isDown ? "Down Week"
+      : isTaper ? "Taper"
+      : "Build";
+
+    const note = isInterPeakDown
+      ? "⬇ Down week — shorter long run between peaks. Let the big efforts absorb."
+      : isDown
       ? "⬇ Recovery week — protect the gains."
       : isTaper && taperWkIdx === 1
       ? "📉 Taper begins — volume drops but intensity stays."
@@ -991,7 +1032,7 @@ function buildEventPlan(profile, event, dayPlan, fb) {
 
     const longSession = Object.values(sessions).find(s => s?.wtype === "long");
     return {
-      weekNum: wn, phase, startDate, isDown, isPeakLong,
+      weekNum: wn, phase, startDate, isDown, isPeakLong, weekLabel,
       sessions, totalKm, note,
       longRunMins: longSession?.estMins || 0,
     };
@@ -1010,6 +1051,12 @@ function buildSlot(slot, W, ctx) {
 
   if (slot === "rest") return W.rest();
   if (slot === "bronies") return W.bronieRun();
+  if (slot === "strength") return {
+    wtype:"rest", label:"Strength Training 🏋", distance:0, estMins:0,
+    summary:"Chat to the Bronies about what you SHOULD be doing",
+    detail:"Strength & conditioning day.\n\nChat to the Bronies about what you SHOULD be doing — they'll have opinions.\n\nFocus on single-leg stability, hip strength, and core work to keep you injury-free.",
+    garmin:["No running today — strength session.", "Ask a Bronie what to do."],
+  };
 
   // If the user has assigned a workout slot to a bronies day, override to BRONIES run
   if (slot === "workout" && isBroniesDay) return W.bronieRun();
@@ -1151,7 +1198,7 @@ function buildBeginnerSession(runKm, pct, ep, isFirst) {
 }
 
 function buildOngoingPlan(profile, dayPlan, fb) {
-  const isHealthy   = profile.trainingGoal === "healthier" || profile.trainingGoal === "returning";
+  const isHealthy   = profile.trainingGoal === "healthier";
   const isHangout   = profile.trainingGoal === "hangout";
 
   // Hangout: simple rolling 8-week plan, BRONIES days as selected
@@ -1694,7 +1741,7 @@ function GarminBlock({ session, paces }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Session card
 // ─────────────────────────────────────────────────────────────
-function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, isToday }) {
+function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, isToday, completionKey, completionMap, onCompletion }) {
   const [open, setOpen]             = useState(false);
   const [editing, setEditing]       = useState(false);
   const [draftDist, setDraftDist]   = useState("");
@@ -1714,6 +1761,15 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
   const isBronies = session.wtype === "bronies";
   const isRace    = session.wtype === "race";
   const canEdit   = !isRest && !isRace;
+  const canChangeSlot = !isRace; // Rest days can be changed to any other type
+
+  // Completion tracking — only shown for past + today sessions that aren't rest
+  const showCompletion = (isPast || isToday) && !isRest && !isRace && completionKey && onCompletion;
+  const completionVal  = completionMap?.[completionKey] || null;
+  const COMPLETION_OPTS = [
+    { value:"yeah_broo",  label:"Yeah Broo 💪",    col:"#1a472a", bg:"#e8f5e9" },
+    { value:"nup_soft",   label:"Nup, bit soft 😬", col:"#c0392b", bg:"#fce8e8" },
+  ];
 
   function openEdit() {
     setDraftDist(session.distance > 0 ? String(session.distance) : "");
@@ -1738,25 +1794,27 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
     setEditing(false);
   }
 
+  const completionBadge = completionVal === "yeah_broo"
+    ? { label:"Yeah Broo 💪", col:"#1a472a", bg:"#e8f5e9" }
+    : completionVal === "nup_soft"
+    ? { label:"Bit soft 😬", col:"#c0392b", bg:"#fce8e8" }
+    : null;
+
   return (
     <div className="card" style={{marginBottom:8,overflow:"hidden",opacity:isRest?0.55:isPast?0.5:1,
       position:"relative",
       background: isToday ? "#E8F5E9" : undefined,
       border: isToday ? "2px solid #4CAF50" : undefined,
       boxShadow: isToday ? "3px 3px 0 #81C784" : undefined}}>
-      {isToday && (
-        <div style={{position:"absolute",top:0,right:0,background:"#4CAF50",color:"white",
-          fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:"0 4px 0 6px",
-          letterSpacing:.8,textTransform:"uppercase"}}>
-          TODAY
-        </div>
-      )}
       <div style={{display:"flex"}}>
         <div style={{width:4,flexShrink:0,background: isToday ? "#4CAF50" : slotMeta.color}}/>
         <div style={{flex:1}}>
           <div style={{display:"flex",alignItems:"center",padding:"11px 14px",
-              cursor:isRest?"default":"pointer",gap:10}}
-            onClick={() => !isRest && setOpen(o=>!o)}>
+              cursor:isRest&&!onDaySlotChange?"default":"pointer",gap:10}}
+            onClick={() => {
+              if (!isRest) setOpen(o=>!o);
+              else if (onDaySlotChange) setOpen(o=>!o); // rest days open to show change options
+            }}>
             <span style={{fontSize:18,flexShrink:0}}>{slotMeta.icon}</span>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:11,fontWeight:700,color:slotMeta.color,letterSpacing:.5,
@@ -1769,9 +1827,19 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                 textDecoration: isPast && !isRest ? "line-through" : "none"}}>{session.summary}</div>
             </div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              {isPast && !isRest && (
+              {isToday && !isRest && (
                 <div style={{fontSize:10,fontWeight:700,color:"white",background:"#4CAF50",
-                  borderRadius:10,padding:"2px 7px",marginBottom:3,letterSpacing:.3}}>✓ done</div>
+                  borderRadius:10,padding:"2px 7px",marginBottom:3,letterSpacing:.3}}>TODAY</div>
+              )}
+              {isPast && !isRest && completionBadge && (
+                <div style={{fontSize:9,fontWeight:700,color:completionBadge.col,background:completionBadge.bg,
+                  borderRadius:10,padding:"2px 7px",marginBottom:3,letterSpacing:.3,border:`1px solid ${completionBadge.col}`}}>
+                  {completionBadge.label}
+                </div>
+              )}
+              {isPast && !isRest && !completionBadge && (
+                <div style={{fontSize:9,fontWeight:600,color:"var(--ink4)",background:"var(--bg)",
+                  borderRadius:10,padding:"2px 7px",marginBottom:3,letterSpacing:.3}}>you do this?</div>
               )}
               {session.distance > 0 && (
                 <div style={{fontSize:16,fontWeight:700,color:"var(--ink)",
@@ -1784,14 +1852,57 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
             </div>
           </div>
 
-          {open && !isRest && (
+          {open && (
             <div style={{padding:"0 14px 14px"}}>
               <hr className="rule" style={{margin:"0 0 12px"}}/>
 
-              {!editing ? (
+              {isRest && onDaySlotChange && (
+                <div>
+                  <div style={{fontSize:12,color:"var(--ink3)",marginBottom:8}}>
+                    Plans change — switch this day to something else:
+                  </div>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {Object.entries(SLOT_TYPES)
+                      .filter(([k]) => k !== "bronies" && k !== "rest")
+                      .map(([k, m]) => (
+                      <button key={k}
+                        onClick={() => { onDaySlotChange(dayId, k); setOpen(false); }}
+                        title={`Change to ${m.label}`}
+                        style={{padding:"5px 8px",fontSize:11,fontWeight:600,
+                          borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                          background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                        {m.icon} {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!isRest && !editing ? (
                 <>
                   <p style={{fontSize:13,color:"var(--ink2)",lineHeight:1.75,
                     whiteSpace:"pre-line",marginBottom:12}}>{session.detail}</p>
+
+                  {/* Completion tracker — only past + today non-rest sessions */}
+                  {showCompletion && (
+                    <div style={{marginBottom:12,padding:"10px 12px",background:"var(--bg)",
+                      borderRadius:"var(--r)",border:"1px solid var(--rule)"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",letterSpacing:.8,
+                        textTransform:"uppercase",marginBottom:8}}>You do this?</div>
+                      <div style={{display:"flex",gap:8}}>
+                        {COMPLETION_OPTS.map(o => (
+                          <button key={o.value} onClick={() => onCompletion(completionKey, o.value)}
+                            style={{flex:1,padding:"9px 4px",fontSize:12,fontWeight:600,cursor:"pointer",
+                              borderRadius:"var(--r)",border:`1.5px solid ${completionVal===o.value?o.col:"var(--rule)"}`,
+                              background:completionVal===o.value?o.bg:"white",
+                              color:completionVal===o.value?o.col:"var(--ink3)",transition:"all .15s"}}>
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <GarminBlock session={session} paces={paces}/>
 
                   {canEdit && (
@@ -1816,7 +1927,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                     </div>
                   )}
                 </>
-              ) : (
+              ) : (!isRest && editing ? (
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {/* Distance editor — only shown when the session has a distance */}
                   {session.distance > 0 && (
@@ -1853,7 +1964,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                     <button onClick={() => setEditing(false)} className="btn btn-g btn-sm">Cancel</button>
                   </div>
                 </div>
-              )}
+              ): null)}
             </div>
           )}
         </div>
@@ -1906,13 +2017,13 @@ function WeeklyFeedback({ weekNum, existing, onSave }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Week detail modal
 // ─────────────────────────────────────────────────────────────
-function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, onClose, paces }) {
+function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, onClose, paces, completionMap, onCompletion }) {
   const ph = PHASES[week.phase] || PHASES.BASE;
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:200,
         display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
       <div style={{background:"#fff",borderRadius:"12px 12px 0 0",width:"100%",
-          maxWidth:560,maxHeight:"92vh",overflowY:"auto",padding:"20px var(--pad-x) 40px"}}
+          maxWidth:560,maxHeight:"92vh",overflowY:"auto",padding:"16px var(--pad-x) 40px"}}
         onClick={e => e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
           <div>
@@ -1946,6 +2057,9 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
             paces={paces}
             isPast={dayIsPast(week.startDate, idx)}
             isToday={dayIsToday(week.startDate, idx)}
+            completionKey={`${week.weekNum}:${d.id}`}
+            completionMap={completionMap}
+            onCompletion={onCompletion}
             onEdit={(dayId, changes) => onEdit && onEdit(week.weekNum, dayId, changes)}
             onDaySlotChange={(dayId, slot) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot)}/>
         ))}
@@ -2188,7 +2302,7 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap }) {
 // ─────────────────────────────────────────────────────────────
 function DayPlanPicker({ value, onChange }) {
   const plan = value || DEFAULT_DAY_PLAN;
-  const slotKeys = ["workout", "easy", "long", "bronies", "rest"];
+  const slotKeys = ["workout", "easy", "long", "bronies", "strength", "rest"];
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -2233,6 +2347,7 @@ function DayPlanPicker({ value, onChange }) {
         <strong style={{color:"var(--ink2)"}}> Easy</strong> = recovery jog · 
         <strong style={{color:"var(--ink2)"}}> Long</strong> = the cornerstone session · 
         <strong style={{color:"var(--ink2)"}}> BRONIES</strong> = 7.99km social run (Wed & Fri only) · 
+        <strong style={{color:"var(--ink2)"}}> Strength</strong> = ask the Bronies · 
         <strong style={{color:"var(--ink2)"}}> Rest</strong> = full day off
       </div>
     </div>
@@ -2784,9 +2899,8 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
 
   const isEvent     = data.trainingGoal === "goal_event";
   const isHealth    = data.trainingGoal === "healthier";
-  const isReturning = data.trainingGoal === "returning";
   const isHangout   = data.trainingGoal === "hangout";
-  const isFitness   = isHealth || isReturning;
+  const isFitness   = isHealth;
 
   function finish() {
     const profile = {
@@ -2848,7 +2962,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 1: Training goal */}
       {step === 1 && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             What are you training for?
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:24,fontStyle:"italic"}}>
@@ -2880,12 +2994,205 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 2: Branch — Event */}
       {step === 2 && isEvent && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Tell us about your event
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
             The race you're targeting and the time you want
           </div>
+
+          {/* ── Event URL Scanner ── */}
+          {(() => {
+            const [scanUrl,      setScanUrl]      = useState("");
+            const [scanning,     setScanning]     = useState(false);
+            const [scanError,    setScanError]    = useState(null);
+            const [scanDone,     setScanDone]     = useState(false);
+            const [multiOptions, setMultiOptions] = useState(null); // array of event variants when page has multiple distances
+
+            function applyParsed(parsed) {
+              if (parsed.name)       upEvent("name",       parsed.name);
+              if (parsed.date)       upEvent("date",       parsed.date);
+              if (parsed.distance)   upEvent("distance",   String(parsed.distance));
+              if (parsed.location)   upEvent("location",   parsed.location);
+              if (parsed.type)       upEvent("type",       parsed.type);
+              if (parsed.elevationM) {
+                const m = parseInt(parsed.elevationM) || 0;
+                upEvent("elevationM", m);
+                upEvent("elevation",  bucketElevation(m, parseFloat(parsed.distance) || 30));
+              }
+              if (parsed.trailType)  upEvent("trailType",  parsed.trailType);
+              upEvent("aidStations", Array.isArray(parsed.aidStations) ? parsed.aidStations : []);
+              upEvent("url", scanUrl.trim());
+              setScanDone(true);
+              setMultiOptions(null);
+            }
+
+            async function runScan() {
+              const url = scanUrl.trim();
+              if (!url) return;
+              setScanning(true); setScanError(null); setScanDone(false); setMultiOptions(null);
+              try {
+                const res = await fetch("https://api.anthropic.com/v1/messages", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    model: "claude-sonnet-4-20250514",
+                    max_tokens: 2000,
+                    tools: [{ type: "web_search_20250305", name: "web_search" }],
+                    system: `You are an assistant that extracts structured running event information from a webpage.
+You MUST respond with ONLY a JSON object — no preamble, no markdown fences, no explanation.
+
+If the page contains MULTIPLE race distances (e.g. 10km, 21km, 50km, 100km options), return:
+{
+  "multiple": true,
+  "variants": [
+    {
+      "label": "50km Trail",
+      "distance": "50",
+      "elevationM": 2800,
+      "type": "trail",
+      "trailType": "Single-track through alpine terrain",
+      "name": "Race Name 50km",
+      "date": "YYYY-MM-DD",
+      "location": "City, Country",
+      "aidStations": [
+        { "name": "Station Name", "km": 23, "drop": true }
+      ]
+    }
+  ]
+}
+
+If there is only ONE distance, return:
+{
+  "multiple": false,
+  "name": "Full event name",
+  "date": "YYYY-MM-DD",
+  "distance": "numeric km as a string e.g. 42.2",
+  "location": "City, State/Country",
+  "type": "trail" | "road" | "mixed",
+  "elevationM": numeric metres of total elevation gain or 0,
+  "trailType": "1-2 sentence description of terrain and course character",
+  "goalTime": null,
+  "aidStations": [
+    { "name": "Station Name", "km": 23, "drop": true }
+  ]
+}
+
+For aidStations: list each checkpoint in order by km. "km" is the distance from the start. "drop" is true if the event page mentions it as a drop bag point. If no aid station info is found, return an empty array []. For road races with no meaningful aid station data (e.g. water tables every 5km) return [].`,
+                    messages: [{
+                      role: "user",
+                      content: `Search for and read this running event page, then return the structured JSON:\n${url}`
+                    }],
+                  }),
+                });
+                const d = await res.json();
+                if (!res.ok) throw new Error(d?.error?.message || "API error");
+                const text = (d.content || [])
+                  .map(b => b.type === "text" ? b.text : "")
+                  .join("\n")
+                  .replace(/```json|```/g, "")
+                  .trim();
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) throw new Error("Couldn't read the event page — try filling in manually");
+                const parsed = JSON.parse(jsonMatch[0]);
+
+                if (parsed.multiple && parsed.variants?.length > 1) {
+                  // Multiple distances found — show picker
+                  setMultiOptions(parsed.variants);
+                } else if (parsed.variants?.length === 1) {
+                  // Only one variant returned in the array — apply it directly
+                  applyParsed(parsed.variants[0]);
+                } else {
+                  applyParsed(parsed);
+                }
+              } catch(e) {
+                setScanError(e.message || "Scan failed — fill in manually");
+              } finally {
+                setScanning(false);
+              }
+            }
+
+            return (
+              <div style={{marginBottom:20,padding:"14px 16px",background:"#f0f4ff",
+                border:"1.5px solid #c5d3f5",borderRadius:"var(--r)"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#1a56db",letterSpacing:.8,
+                  textTransform:"uppercase",marginBottom:8}}>🔍 Scan Event Page</div>
+                <div style={{fontSize:12,color:"var(--ink3)",marginBottom:10,lineHeight:1.5}}>
+                  Paste the event URL and tap Scan — we'll fill in the details automatically.
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <input
+                    value={scanUrl}
+                    onChange={e => { setScanUrl(e.target.value); setScanDone(false); setScanError(null); setMultiOptions(null); }}
+                    placeholder="https://eventwebsite.com.au/race"
+                    className="inp"
+                    style={{flex:1,fontSize:13}}
+                  />
+                  <button
+                    onClick={runScan}
+                    disabled={scanning || !scanUrl.trim()}
+                    className="btn btn-p"
+                    style={{flexShrink:0,minWidth:72,opacity:scanning||!scanUrl.trim()?0.6:1}}>
+                    {scanning ? "…" : "Scan"}
+                  </button>
+                </div>
+
+                {scanning && (
+                  <div style={{marginTop:10,fontSize:12,color:"#1a56db",fontStyle:"italic",
+                    display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>
+                    Reading event page…
+                  </div>
+                )}
+
+                {/* Multiple distance picker */}
+                {multiOptions && (
+                  <div style={{marginTop:12}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",marginBottom:8}}>
+                      This event has multiple distances — which one are you doing?
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      {multiOptions.map((opt, i) => (
+                        <button key={i} onClick={() => applyParsed(opt)}
+                          style={{textAlign:"left",padding:"10px 14px",borderRadius:"var(--r)",
+                            border:"1.5px solid #c5d3f5",background:"white",cursor:"pointer",
+                            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div>
+                            <div style={{fontSize:13,fontWeight:700,color:"var(--ink)"}}>
+                              {opt.label || `${opt.distance}km`}
+                            </div>
+                            {opt.elevationM > 0 && (
+                              <div style={{fontSize:11,color:"var(--ink4)",marginTop:1}}>
+                                {opt.elevationM.toLocaleString()}m elevation · {opt.type}
+                              </div>
+                            )}
+                          </div>
+                          <span style={{fontSize:18,fontFamily:"var(--mono)",fontWeight:700,
+                            color:"#1a56db"}}>{opt.distance}km</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {scanDone && !scanError && (
+                  <div style={{marginTop:10,padding:"8px 12px",background:"#e8f5e9",
+                    border:"1px solid #4CAF50",borderRadius:"var(--r)",
+                    fontSize:12,color:"#1a472a",fontWeight:600}}>
+                    ✓ Fields filled in below — check and adjust anything that looks off
+                  </div>
+                )}
+                {scanError && (
+                  <div style={{marginTop:10,padding:"8px 12px",background:"#fce8e8",
+                    border:"1px solid #ef5350",borderRadius:"var(--r)",
+                    fontSize:12,color:"#c0392b"}}>
+                    ⚠ {scanError}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             <div>
               <label className="lbl">Event Name *</label>
@@ -3000,8 +3307,8 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 2: Branch — Healthier / Returning */}
       {step === 2 && isFitness && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
-            {isHealth ? "Let's get you moving" : "Welcome back"}
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
+            Let's get you moving
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
             A few questions to set realistic goals
@@ -3164,7 +3471,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 2: Branch — Hangout */}
       {step === 2 && isHangout && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Coffee With the Boys
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:24,fontStyle:"italic"}}>
@@ -3195,7 +3502,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 3: Baseline performance — not for hangout */}
       {step === 3 && !isHangout && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Your current pace
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
@@ -3261,7 +3568,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 4: Days + slot types — event branch only */}
       {step === 4 && isEvent && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Your training week
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
@@ -3274,7 +3581,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 4: Days for fitness branch (simpler — auto-distribute by frequency) */}
       {step === 4 && isFitness && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Your training week
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
@@ -3287,7 +3594,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {/* STEP 5: Event branch only — context */}
       {step === 5 && isEvent && (
         <div>
-          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Final touches
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
@@ -3433,7 +3740,7 @@ function Header({ screen, onNav, hasData, skin, setSkin }) {
       <div style={{background:"var(--nav)",padding:"10px var(--pad-x)",borderBottom:"3px solid var(--gold)",
         display:"flex",alignItems:"center",gap:12}}>
         <div style={{flex:1,display:"flex",alignItems:"baseline",gap:10}}>
-          <div style={{fontFamily:"var(--display)",fontSize:28,letterSpacing:3,color:"white",
+          <div style={{fontFamily:"var(--display)",fontSize:"clamp(20px,6vw,28px)",letterSpacing:3,color:"white",
             fontStyle:"italic",lineHeight:1,textShadow:"2px 2px 0 #1A3060"}}>
             BRONIES
           </div>
@@ -3472,6 +3779,7 @@ function Header({ screen, onNav, hasData, skin, setSkin }) {
           borderBottom:"2px solid var(--nav)"}}>
           {[
             {id:"plan",    label:"Plan"},
+            {id:"stats",   label:"Stats"},
             {id:"event",   label:"Event"},
             {id:"profile", label:"Profile"},
           ].map(t => (
@@ -3500,7 +3808,7 @@ function WelcomeScreen({ onStart, onDemo }) {
             BRONIES
           </div>
         </div>
-        <div style={{fontFamily:"var(--display)",fontSize:62,letterSpacing:2,lineHeight:1,
+        <div style={{fontFamily:"var(--display)",fontSize:"clamp(42px,14vw,62px)",letterSpacing:2,lineHeight:1,
           fontStyle:"italic",color:"var(--gold)",marginBottom:28,
           textShadow:"4px 4px 0 #C49A00,6px 6px 0 #8B6800"}}>
           .99 TRAINING
@@ -3617,6 +3925,369 @@ function ConfirmDialog({ open, title, message, confirmLabel, cancelLabel, danger
 }
 
 // ─────────────────────────────────────────────────────────────
+//  UI: Stats Screen
+//  Charts driven entirely from existing state — no new data needed.
+//  • Weekly volume bar chart (plan, with completion colouring)
+//  • Long run progression line
+//  • Completion rate (yeah_broo vs nup_soft vs unanswered)
+//  • Load rating donut (too_easy / ok / too_hard per week)
+//  • Session type breakdown (what % of sessions were what)
+//  • Current streak
+// ─────────────────────────────────────────────────────────────
+function StatsScreen({ plan, completionMap, feedbackMap, profile, event }) {
+  if (!plan || plan.length === 0) return (
+    <div style={{padding:"48px var(--pad-x)",textAlign:"center"}}>
+      <div style={{fontSize:40,marginBottom:12}}>📊</div>
+      <div style={{fontSize:16,fontWeight:600,color:"var(--ink3)"}}>No stats yet</div>
+      <div style={{fontSize:13,color:"var(--ink4)",marginTop:4,fontStyle:"italic"}}>
+        Complete your setup and start training — stats appear here as you go
+      </div>
+    </div>
+  );
+
+  // ── Derive the data we need ──────────────────────────────
+  const weeksWithData = plan.filter(w => w.weekNum && !w.isRaceWeek);
+
+  // Completion data — flatten all sessions that had a completion answer
+  const allSessions = [];
+  weeksWithData.forEach(w => {
+    DAYS.forEach(d => {
+      const s = w.sessions?.[d.id];
+      if (!s || s.wtype === "rest") return;
+      const key = `${w.weekNum}:${d.id}`;
+      const comp = completionMap[key] || null;
+      allSessions.push({ weekNum: w.weekNum, dayId: d.id, wtype: s.wtype, comp, startDate: w.startDate });
+    });
+  });
+
+  // Only past + today sessions are eligible for completion tracking
+  const eligibleSessions = allSessions.filter(s => {
+    const idx = DAYS.findIndex(d => d.id === s.dayId);
+    return dayIsPast(s.startDate, idx) || dayIsToday(s.startDate, idx);
+  });
+
+  const answered    = eligibleSessions.filter(s => s.comp !== null);
+  const yeahBroo   = answered.filter(s => s.comp === "yeah_broo").length;
+  const nupSoft    = answered.filter(s => s.comp === "nup_soft").length;
+  const unanswered = eligibleSessions.length - answered.length;
+
+  const completionPct = answered.length > 0
+    ? Math.round((yeahBroo / answered.length) * 100)
+    : null;
+
+  // Load feedback counts
+  const fbCounts = { too_easy: 0, ok: 0, too_hard: 0 };
+  Object.values(feedbackMap).forEach(v => { if (fbCounts[v] !== undefined) fbCounts[v]++; });
+  const fbTotal = Object.values(fbCounts).reduce((a, b) => a + b, 0);
+
+  // Session type breakdown (eligible sessions only)
+  const wtypeGroups = {};
+  eligibleSessions.forEach(s => {
+    const bucket = ["intervals","tempo","fartlek","hills","onoff","overunder","ladder","progression"].includes(s.wtype)
+      ? "workout"
+      : s.wtype === "long" ? "long"
+      : s.wtype === "bronies" ? "bronies"
+      : s.wtype === "easy" ? "easy"
+      : "other";
+    wtypeGroups[bucket] = (wtypeGroups[bucket] || 0) + 1;
+  });
+  const wtypeTotal = eligibleSessions.length || 1;
+
+  // Streak — consecutive past/today weeks where ≥1 session is yeah_broo
+  let streak = 0;
+  for (let i = weeksWithData.length - 1; i >= 0; i--) {
+    const w = weeksWithData[i];
+    if (weekStatus(w.startDate) === "future") continue;
+    const wKeys = DAYS.map(d => `${w.weekNum}:${d.id}`);
+    const hasYeah = wKeys.some(k => completionMap[k] === "yeah_broo");
+    if (hasYeah) streak++;
+    else break;
+  }
+
+  // Volume chart data — past + current weeks
+  const volumeWeeks = weeksWithData.filter(w => weekStatus(w.startDate) !== "future");
+  const maxKm = Math.max(...volumeWeeks.map(w => w.totalKm || 0), 1);
+
+  // Long run progression — past weeks with a long session
+  const longRuns = weeksWithData
+    .filter(w => {
+      const wst = weekStatus(w.startDate);
+      return wst !== "future";
+    })
+    .map(w => {
+      const ls = Object.values(w.sessions || {}).find(s => s?.wtype === "long");
+      return ls ? { weekNum: w.weekNum, km: ls.distance || 0 } : null;
+    })
+    .filter(Boolean);
+
+  // ── Helpers ──────────────────────────────────────────────
+  const Section = ({ title, children }) => (
+    <div style={{marginBottom:20}}>
+      <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",letterSpacing:1,
+        textTransform:"uppercase",marginBottom:10,padding:"0 var(--pad-x)"}}>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+
+  const StatBox = ({ label, value, sub, col }) => (
+    <div style={{flex:1,background:"var(--white)",border:"2px solid var(--rule)",
+      borderRadius:"var(--r)",padding:"12px 14px",boxShadow:"var(--card-shadow)",minWidth:0}}>
+      <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",letterSpacing:.8,
+        textTransform:"uppercase",marginBottom:4}}>{label}</div>
+      <div style={{fontFamily:"var(--mono)",fontSize:26,fontWeight:700,
+        color:col||"var(--accent)",lineHeight:1}}>{value}</div>
+      {sub && <div style={{fontSize:10,color:"var(--ink4)",marginTop:3,fontStyle:"italic"}}>{sub}</div>}
+    </div>
+  );
+
+  const BarRow = ({ label, value, max, col, detail }) => {
+    const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+    return (
+      <div style={{marginBottom:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:11,
+          color:"var(--ink3)",marginBottom:3}}>
+          <span style={{fontWeight:600}}>{label}</span>
+          <span style={{fontFamily:"var(--mono)",color:"var(--ink)"}}>{detail}</span>
+        </div>
+        <div style={{height:8,background:"var(--bg)",borderRadius:4,overflow:"hidden",
+          border:"1px solid var(--rule)"}}>
+          <div style={{width:`${pct}%`,height:"100%",background:col||"var(--accent)",
+            borderRadius:4,transition:"width .4s ease"}}/>
+        </div>
+      </div>
+    );
+  };
+
+  const hasPastData = volumeWeeks.length > 0;
+
+  return (
+    <div style={{paddingBottom:40}}>
+
+      {/* ── Hero stats row ── */}
+      <div style={{padding:"16px var(--pad-x) 0",display:"flex",gap:10,marginBottom:20}}>
+        <StatBox
+          label="Weeks done"
+          value={volumeWeeks.length}
+          sub={`of ${weeksWithData.length} total`}
+          col="var(--ink2)"
+        />
+        <StatBox
+          label="Sessions completed"
+          value={completionPct !== null ? `${completionPct}%` : "—"}
+          sub={answered.length > 0 ? `${yeahBroo} of ${answered.length} answered` : "Tap sessions to track"}
+          col={completionPct >= 80 ? "#1a472a" : completionPct >= 50 ? "#7a4f00" : "var(--accent)"}
+        />
+        <StatBox
+          label="Streak"
+          value={streak > 0 ? `${streak}W` : "—"}
+          sub={streak > 0 ? "weeks with a run" : "Start your streak!"}
+          col={streak >= 4 ? "#1a472a" : streak >= 2 ? "#7a4f00" : "var(--ink3)"}
+        />
+      </div>
+
+      {!hasPastData && (
+        <div style={{padding:"0 var(--pad-x) 20px"}}>
+          <div style={{background:"var(--gold-pale)",border:"1px solid var(--gold-dark)",
+            borderRadius:"var(--r)",padding:"12px 14px",fontSize:12,color:"#7a4f00",
+            lineHeight:1.6,fontStyle:"italic"}}>
+            📅 Stats fill in as your training weeks pass — check back after your first week
+          </div>
+        </div>
+      )}
+
+      {/* ── Volume chart ── */}
+      {hasPastData && (
+        <Section title="Weekly volume (km)">
+          <div style={{padding:"0 var(--pad-x)"}}>
+            <div style={{display:"flex",alignItems:"flex-end",gap:3,height:80,marginBottom:4}}>
+              {volumeWeeks.map((w, i) => {
+                const h   = Math.max(4, Math.round((w.totalKm / maxKm) * 72));
+                const wst = weekStatus(w.startDate);
+                const wKeys = DAYS.map(d => `${w.weekNum}:${d.id}`);
+                const hasYeah = wKeys.some(k => completionMap[k] === "yeah_broo");
+                const hasNup  = wKeys.some(k => completionMap[k] === "nup_soft");
+                const col = wst === "current" ? "var(--accent)"
+                          : w.isPeakLong     ? "#5b2d8e"
+                          : w.isDown         ? "#A0C8F0"
+                          : hasYeah          ? "#4CAF50"
+                          : hasNup           ? "#ef9a9a"
+                          : "var(--rule)";
+                return (
+                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",
+                    alignItems:"center",gap:2}}>
+                    <div style={{width:"100%",height:h,background:col,borderRadius:"2px 2px 0 0",
+                      minWidth:0,position:"relative"}}
+                      title={`Week ${w.weekNum}: ${w.totalKm}km`}/>
+                    <div style={{fontSize:8,color:"var(--ink4)",letterSpacing:0}}>
+                      {w.weekNum}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Legend */}
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>
+              {[
+                {col:"#4CAF50",  label:"Yeah Broo"},
+                {col:"#ef9a9a",  label:"Bit soft"},
+                {col:"var(--rule)", label:"No answer"},
+                {col:"#5b2d8e",  label:"Peak long run"},
+                {col:"#A0C8F0",  label:"Down week"},
+                {col:"var(--accent)", label:"This week"},
+              ].map(l => (
+                <div key={l.label} style={{display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{width:8,height:8,borderRadius:2,background:l.col,flexShrink:0}}/>
+                  <span style={{fontSize:9,color:"var(--ink4)"}}>{l.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* ── Long run progression ── */}
+      {longRuns.length > 1 && (
+        <Section title="Long run progression">
+          <div style={{padding:"0 var(--pad-x)"}}>
+            <div style={{display:"flex",alignItems:"flex-end",gap:4,height:60,marginBottom:4}}>
+              {longRuns.map((lr, i) => {
+                const maxLr = Math.max(...longRuns.map(l => l.km), 1);
+                const h = Math.max(4, Math.round((lr.km / maxLr) * 54));
+                return (
+                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",
+                    alignItems:"center",gap:2}} title={`Wk ${lr.weekNum}: ${lr.km}km`}>
+                    <div style={{fontSize:8,color:"var(--ink3)",fontFamily:"var(--mono)"}}>
+                      {lr.km}
+                    </div>
+                    <div style={{width:"100%",height:h,background:"#5b2d8e",
+                      borderRadius:"2px 2px 0 0",opacity:0.75+i*0.02}}/>
+                    <div style={{fontSize:7,color:"var(--ink4)"}}>{lr.weekNum}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:10,color:"var(--ink4)",fontStyle:"italic",textAlign:"center"}}>
+              Long runs by week (km) — building toward race day
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* ── Completion breakdown ── */}
+      {eligibleSessions.length > 0 && (
+        <Section title={`Session check-ins (${eligibleSessions.length} eligible)`}>
+          <div style={{padding:"0 var(--pad-x)"}}>
+            <BarRow
+              label="Yeah Broo 💪"
+              value={yeahBroo}
+              max={eligibleSessions.length}
+              col="#4CAF50"
+              detail={`${yeahBroo} sessions`}
+            />
+            <BarRow
+              label="Nup, bit soft 😬"
+              value={nupSoft}
+              max={eligibleSessions.length}
+              col="#ef5350"
+              detail={`${nupSoft} sessions`}
+            />
+            <BarRow
+              label="No answer yet"
+              value={unanswered}
+              max={eligibleSessions.length}
+              col="#e0e0e0"
+              detail={`${unanswered} sessions`}
+            />
+          </div>
+        </Section>
+      )}
+
+      {/* ── Session type breakdown ── */}
+      {eligibleSessions.length > 0 && (
+        <Section title="What you've been running">
+          <div style={{padding:"0 var(--pad-x)"}}>
+            {[
+              { key:"long",    label:"Long Runs",   icon:"🏔", col:"#5b2d8e" },
+              { key:"workout", label:"Workouts",    icon:"⚡", col:"#7a4f00" },
+              { key:"bronies", label:"BRONIES Runs",icon:"☕", col:"#1a472a" },
+              { key:"easy",    label:"Easy Runs",   icon:"🦶", col:"#1a56db" },
+            ].filter(t => wtypeGroups[t.key] > 0).map(t => (
+              <BarRow
+                key={t.key}
+                label={`${t.icon} ${t.label}`}
+                value={wtypeGroups[t.key] || 0}
+                max={wtypeTotal}
+                col={t.col}
+                detail={`${wtypeGroups[t.key]} · ${Math.round(((wtypeGroups[t.key]||0)/wtypeTotal)*100)}%`}
+              />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Weekly load feedback ── */}
+      {fbTotal > 0 && (
+        <Section title={`Weekly load check-ins (${fbTotal} weeks)`}>
+          <div style={{padding:"0 var(--pad-x)"}}>
+            <BarRow label="Too Easy 😴" value={fbCounts.too_easy} max={fbTotal} col="#1a56db"
+              detail={`${fbCounts.too_easy} weeks`}/>
+            <BarRow label="Just Right ✓" value={fbCounts.ok} max={fbTotal} col="#4CAF50"
+              detail={`${fbCounts.ok} weeks`}/>
+            <BarRow label="Too Hard 😅" value={fbCounts.too_hard} max={fbTotal} col="#ef5350"
+              detail={`${fbCounts.too_hard} weeks`}/>
+            {fbCounts.too_hard > fbTotal * 0.4 && (
+              <div style={{marginTop:10,padding:"10px 12px",background:"#fce8e8",
+                borderLeft:"3px solid #ef5350",borderRadius:"var(--r)",
+                fontSize:11,color:"#c0392b",lineHeight:1.6}}>
+                ⚠️ More than 40% of your weeks felt too hard — consider adding feedback so the plan adjusts the load.
+              </div>
+            )}
+            {fbCounts.too_easy > fbTotal * 0.5 && (
+              <div style={{marginTop:10,padding:"10px 12px",background:"#e8f0fe",
+                borderLeft:"3px solid #1a56db",borderRadius:"var(--r)",
+                fontSize:11,color:"#1a56db",lineHeight:1.6}}>
+                💡 Plan feels consistently easy — mark weeks as "Too Easy" to push the volume up.
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Training summary card ── */}
+      <Section title="Training block summary">
+        <div style={{padding:"0 var(--pad-x)"}}>
+          <div className="card" style={{padding:"14px 16px"}}>
+            {[
+              { label:"Training weeks",    val: weeksWithData.length },
+              { label:"Weeks completed",   val: volumeWeeks.length },
+              { label:"Total planned km",  val: `${weeksWithData.reduce((s,w)=>s+(w.totalKm||0),0)}km` },
+              { label:"Peak week",         val: (() => {
+                const pk = weeksWithData.reduce((a,b)=>(b.totalKm||0)>(a.totalKm||0)?b:a, weeksWithData[0]);
+                return pk ? `Wk ${pk.weekNum} — ${pk.totalKm}km` : "—";
+              })() },
+              { label:"Longest long run",  val: longRuns.length > 0
+                ? `${Math.max(...longRuns.map(l=>l.km))}km`
+                : "—" },
+              { label:"Sessions checked in", val: `${answered.length} / ${eligibleSessions.length}` },
+            ].map(({label, val}) => (
+              <div key={label} style={{display:"flex",justifyContent:"space-between",
+                alignItems:"baseline",padding:"7px 0",borderBottom:"1px solid var(--rule)"}}>
+                <span style={{fontSize:12,color:"var(--ink3)"}}>{label}</span>
+                <span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:700,
+                  color:"var(--ink)"}}>{val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Section>
+
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 //  ROOT APP
 // ─────────────────────────────────────────────────────────────
 export default function App() {
@@ -3631,6 +4302,7 @@ export default function App() {
   const [confirmCfg,     setConfirmCfg]     = useState(null);
   const [sessionOverrides, setSessionOverrides] = useState({});
   const [daySlotOverrides, setDaySlotOverrides] = useState({});
+  const [completionMap,    setCompletionMap]    = useState({}); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
   const [skin,           setSkinState]      = useState("default"); // "default" | "8bit"
 
   // Apply skin to <body data-skin="..."> and persist choice
@@ -3660,6 +4332,7 @@ export default function App() {
       try { const r = await window.storage.get("bep6_fb");      if (r) setFeedbackMap(JSON.parse(r.value)); } catch {}
       try { const r = await window.storage.get("bep6_overrides"); if (r) setSessionOverrides(JSON.parse(r.value)); } catch {}
       try { const r = await window.storage.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
+      try { const r = await window.storage.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
       try { const r = await window.storage.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
     })();
   }, []);
@@ -3726,6 +4399,14 @@ export default function App() {
     showToast("Session updated");
   }
 
+  // Record whether a session was completed ("yeah_broo") or skipped ("nup_soft").
+  // Key format: "weekNum:dayId" e.g. "3:wed"
+  function handleCompletion(key, value) {
+    const next = { ...completionMap, [key]: value };
+    setCompletionMap(next);
+    try { window.storage.set("bep6_completions", JSON.stringify(next)); } catch {}
+  }
+
   // Swap the slot type (workout/easy/long/rest) for a specific day in a week.
   function handleDaySlotChange(weekNum, dayId, newSlot) {
     const next = {
@@ -3769,11 +4450,12 @@ export default function App() {
       danger:true,
       onConfirm: async () => {
         setEvent(null); setPlan([]); setFeedbackMap({});
-        setSessionOverrides({}); setDaySlotOverrides({});
+        setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
         try { await window.storage.delete("bep6_event"); } catch {}
         try { await window.storage.delete("bep6_fb"); } catch {}
         try { await window.storage.delete("bep6_overrides"); } catch {}
         try { await window.storage.delete("bep6_slots"); } catch {}
+        try { await window.storage.delete("bep6_completions"); } catch {}
         setConfirmCfg(null);
         showToast("Event cleared");
       },
@@ -3788,13 +4470,14 @@ export default function App() {
       danger:true,
       onConfirm: async () => {
         setProfile(null); setEvent(null); setPlan([]); setFeedbackMap({});
-        setSessionOverrides({}); setDaySlotOverrides({});
+        setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
         try {
           await window.storage.delete("bep6_profile");
           await window.storage.delete("bep6_event");
           await window.storage.delete("bep6_fb");
           await window.storage.delete("bep6_overrides");
           await window.storage.delete("bep6_slots");
+          await window.storage.delete("bep6_completions");
         } catch {}
         setConfirmCfg(null);
         setScreen("welcome");
@@ -3831,6 +4514,16 @@ export default function App() {
             } : null}/>
         )}
 
+        {screen === "stats" && hasData && (
+          <StatsScreen
+            plan={planWithOverrides}
+            completionMap={completionMap}
+            feedbackMap={feedbackMap}
+            profile={profile}
+            event={event}
+          />
+        )}
+
         {screen === "plan" && hasData && (
           <div>
             {isHangout ? (
@@ -3862,10 +4555,10 @@ export default function App() {
                   </div>
                 ) : (
                   <div style={{padding:"20px var(--pad-x)",background:"white",borderBottom:"1px solid var(--rule)"}}>
-                    {(profile.trainingGoal === "healthier" || profile.trainingGoal === "returning") ? (
+                    {profile.trainingGoal === "healthier" ? (
                       <>
                         <div style={{fontFamily:"var(--display)",fontSize:22,letterSpacing:1,marginBottom:4}}>
-                          {profile.trainingGoal === "returning" ? "Welcome back" : "Getting into it"}
+                          Getting into it
                         </div>
                         <div style={{fontSize:13,color:"var(--ink3)",fontStyle:"italic"}}>
                           {(() => {
@@ -3931,6 +4624,78 @@ export default function App() {
                     {event.trailType}
                   </div>
                 )}
+
+                {/* Aid stations */}
+                {event.aidStations?.length > 0 && (() => {
+                  const stations = event.aidStations;
+                  const totalKm  = parseFloat(event.distance) || 0;
+                  // Add a virtual finish so we can show the gap from last station to finish
+                  const withFinish = [...stations, { name:"Finish", km: totalKm, drop: false, _finish: true }];
+                  return (
+                    <div style={{marginTop:10,padding:"10px 12px",background:"var(--bg)",
+                      borderRadius:"var(--r)",borderLeft:"2px solid #1a472a"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"var(--ink3)",letterSpacing:.8,
+                        textTransform:"uppercase",marginBottom:8}}>
+                        Aid Stations ({stations.length})
+                      </div>
+                      {withFinish.map((s, i) => {
+                        const prev   = i === 0 ? 0 : stations[i - 1]?.km || 0;
+                        const gap    = Math.round((s.km - prev) * 10) / 10;
+                        const isLong = gap >= 15;
+                        const isMed  = gap >= 8 && gap < 15;
+                        return (
+                          <div key={i} style={{display:"flex",alignItems:"flex-start",
+                            gap:8,marginBottom: i < withFinish.length - 1 ? 0 : 0}}>
+                            {/* Timeline spine */}
+                            <div style={{display:"flex",flexDirection:"column",alignItems:"center",
+                              flexShrink:0,width:16}}>
+                              <div style={{width:10,height:10,borderRadius:"50%",flexShrink:0,marginTop:2,
+                                background: s._finish ? "var(--accent)"
+                                  : s.drop ? "#1a472a" : "#9a9a9a",
+                                border:"2px solid white",
+                                boxShadow:"0 0 0 1px " + (s._finish ? "var(--accent)" : s.drop ? "#1a472a" : "#9a9a9a"),
+                              }}/>
+                              {i < withFinish.length - 1 && (
+                                <div style={{width:2,flex:1,minHeight:18,
+                                  background: isLong ? "#ef9a9a" : isMed ? "#ffe082" : "#d0d0d0",
+                                  marginTop:2}}/>
+                              )}
+                            </div>
+                            {/* Station info */}
+                            <div style={{flex:1,paddingBottom:i < withFinish.length - 1 ? 8 : 0}}>
+                              <div style={{display:"flex",justifyContent:"space-between",
+                                alignItems:"baseline"}}>
+                                <span style={{fontSize:12,fontWeight:600,
+                                  color: s._finish ? "var(--accent)" : "var(--ink)"}}>
+                                  {s.name}
+                                  {s.drop && !s._finish && (
+                                    <span style={{marginLeft:5,fontSize:9,fontWeight:700,
+                                      color:"#1a472a",background:"#e8f5e9",borderRadius:4,
+                                      padding:"1px 4px",verticalAlign:"middle"}}>DROP</span>
+                                  )}
+                                </span>
+                                <span style={{fontFamily:"var(--mono)",fontSize:11,
+                                  color:"var(--ink3)",fontWeight:600}}>{s.km}km</span>
+                              </div>
+                              {i > 0 && (
+                                <div style={{fontSize:10,marginTop:1,
+                                  color: isLong ? "#c0392b" : isMed ? "#7a4f00" : "var(--ink4)",
+                                  fontWeight: isLong ? 700 : 400}}>
+                                  {gap}km from previous
+                                  {isLong && " ⚠ long gap — carry extra"}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div style={{marginTop:8,fontSize:10,color:"var(--ink4)",fontStyle:"italic",
+                        borderTop:"1px solid var(--rule)",paddingTop:6}}>
+                        🟢 Drop bag point · Grey = water/food only · Red gap = 15km+
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div style={{display:"flex",gap:8,marginTop:12}}>
                   <button onClick={() => setScreen("onboarding")} className="btn btn-g btn-sm">✏ Change event</button>
                   <button onClick={clearEvent} className="btn btn-g btn-sm"
@@ -4017,6 +4782,8 @@ export default function App() {
             onDaySlotChange={handleDaySlotChange}
             onFeedback={handleFeedback}
             feedbackMap={feedbackMap}
+            completionMap={completionMap}
+            onCompletion={handleCompletion}
             onClose={() => setSelWeek(null)}/>
         )}
 
