@@ -246,21 +246,28 @@ const G = ({ skin }) => {
 
 function todaySydney() {
   // Returns a plain Date whose year/month/day match Sydney wall-clock today.
-  // We use Intl to get the Sydney date parts, then construct via new Date(y,m,d)
-  // (NOT via a string like "2025-05-24T00:00:00" which would be parsed as local
-  // time on some engines and UTC on others — the Date constructor with numeric
-  // parts is always unambiguously local midnight).
+  // Uses numeric Date constructor — unambiguously local midnight on all engines.
   const parts = new Intl.DateTimeFormat("en-AU", {
     timeZone: "Australia/Sydney",
     year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(new Date());
   const y = parseInt(parts.find(p => p.type === "year").value, 10);
-  const m = parseInt(parts.find(p => p.type === "month").value, 10) - 1; // 0-indexed
+  const m = parseInt(parts.find(p => p.type === "month").value, 10) - 1;
   const d = parseInt(parts.find(p => p.type === "day").value, 10);
   return new Date(y, m, d, 0, 0, 0, 0);
 }
 
 const TODAY = todaySydney();
+
+// Monday of the week that contains TODAY.
+// JS getDay(): 0=Sun,1=Mon,...,6=Sat  →  offset to Mon-anchored week.
+const THIS_WEEK_MONDAY = (() => {
+  const d = new Date(TODAY);
+  const dow = d.getDay(); // 0=Sun … 6=Sat
+  const offsetToMonday = dow === 0 ? -6 : 1 - dow; // Sun → -6, Mon → 0, Tue → -1, …
+  d.setDate(d.getDate() + offsetToMonday);
+  return d;
+})();
 
 const PHASES = {
   BASE:  { label:"Base",  color:"#1a6b6b" },
@@ -302,7 +309,25 @@ const DAYS = [
   { id:"sun", label:"Sunday",    short:"SUN" },
 ];
 
-// Session slot types — what kind of run goes on a given day
+// Normalise a dayPlan slot value to an array.
+// Old format: "workout" → ["workout"]
+// New format: ["workout","strength"] → ["workout","strength"]
+function normaliseSlot(raw) {
+  if (!raw) return ["rest"];
+  if (Array.isArray(raw)) return raw.length ? raw : ["rest"];
+  return [raw];
+}
+
+// Returns the primary run type from a slot array (first non-strength, non-rest entry)
+function primarySlot(slots) {
+  const s = normaliseSlot(slots);
+  return s.find(k => k !== "strength") || s[0] || "rest";
+}
+
+// Returns true if strength is included in a slot array
+function hasStrength(slots) {
+  return normaliseSlot(slots).includes("strength");
+}
 const SLOT_TYPES = {
   workout:   { label:"Workout",           icon:"⚡", color:"#7a4f00",
                desc:"Intervals, tempo, hills, fartlek" },
@@ -470,9 +495,10 @@ function weeksUntil(d) {
 }
 
 function dateFromToday(w) {
-  const d = new Date(TODAY);
+  // Returns the Monday date for week offset w (0 = this week's Monday).
+  // Always Mon-anchored so day indices 0–6 = Mon–Sun correctly.
+  const d = new Date(THIS_WEEK_MONDAY);
   d.setDate(d.getDate() + w * 7);
-  // Format as YYYY-MM-DD using local date parts — no UTC conversion
   const yy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -517,10 +543,13 @@ function dayIsPast(weekStartDate, dayIndex) {
   return d ? d < TODAY : false;
 }
 
-// Is a specific day exactly today?
+// Is a specific day exactly today? Compare date parts, not timestamps.
 function dayIsToday(weekStartDate, dayIndex) {
   const d = dayDate(weekStartDate, dayIndex);
-  return d ? d.getTime() === TODAY.getTime() : false;
+  if (!d) return false;
+  return d.getFullYear() === TODAY.getFullYear()
+      && d.getMonth()    === TODAY.getMonth()
+      && d.getDate()     === TODAY.getDate();
 }
 
 function goalMult(goal) {
@@ -997,14 +1026,14 @@ function buildEventPlan(profile, event, dayPlan, fb) {
     const sessions = {};
     let workoutSlotIdx = 0; // increments each time a "workout" slot is assigned in this week
     DAYS.forEach(d => {
-      const slot = dayPlan[d.id] || "rest";
+      const slot = normaliseSlot(dayPlan[d.id]);
       sessions[d.id] = buildSlot(slot, W, {
         wn, dayId: d.id,
         slotIdx: slot === "workout" ? workoutSlotIdx : 0,
         isDown, isTaper, taperWkIdx, isPeakLong, isTrail, paces,
         profile, event, longKm,
       });
-      if (slot === "workout") workoutSlotIdx++;
+      if (primarySlot(slot) === "workout") workoutSlotIdx++;
     });
 
     const totalKm = Math.round(
@@ -1042,54 +1071,70 @@ function buildEventPlan(profile, event, dayPlan, fb) {
 // Build a single day's session based on the slot type.
 // slotIdx: counts how many "workout" slots have already been assigned this week
 //          so two workout days get different sessions (0 = first, 1 = second)
-function buildSlot(slot, W, ctx) {
+function buildSlot(slots, W, ctx) {
+  const slotArr     = normaliseSlot(slots);
+  const primary     = primarySlot(slotArr);
+  const addStrength = hasStrength(slotArr) && primary !== "rest" && primary !== "strength";
+
   const { wn, dayId, slotIdx, isDown, isTaper, taperWkIdx, isPeakLong,
           isTrail, paces, profile, event, longKm } = ctx;
-
-  // Wed and Fri are sacred BRONIES days — never assign tempo/workout there
   const isBroniesDay = dayId === "wed" || dayId === "fri";
 
-  if (slot === "rest") return W.rest();
-  if (slot === "bronies") return W.bronieRun();
-  if (slot === "strength") return {
-    wtype:"rest", label:"Strength Training 🏋", distance:0, estMins:0,
-    summary:"Chat to the Bronies about what you SHOULD be doing",
-    detail:"Strength & conditioning day.\n\nChat to the Bronies about what you SHOULD be doing — they'll have opinions.\n\nFocus on single-leg stability, hip strength, and core work to keep you injury-free.",
-    garmin:["No running today — strength session.", "Ask a Bronie what to do."],
-  };
+  let session;
 
-  // If the user has assigned a workout slot to a bronies day, override to BRONIES run
-  if (slot === "workout" && isBroniesDay) return W.bronieRun();
+  if (primary === "rest") return W.rest();
 
-  if (slot === "easy") {
+  if (primary === "bronies") {
+    session = W.bronieRun();
+  } else if (primary === "strength") {
+    return {
+      wtype:"rest", label:"Strength Training 🏋", distance:0, estMins:0,
+      summary:"Chat to the Bronies about what you SHOULD be doing",
+      detail:"Strength & conditioning day.\n\nChat to the Bronies about what you SHOULD be doing — they'll have opinions.\n\nFocus on single-leg stability, hip strength, and core work to keep you injury-free.",
+      garmin:["No running today — strength session.", "Ask a Bronie what to do."],
+    };
+  } else if (primary === "workout" && isBroniesDay) {
+    session = W.bronieRun();
+  } else if (primary === "easy") {
     if (isTaper && taperWkIdx >= 2) {
-      return { ...W.easyRun(30), label:"Easy + Strides", summary:"30min easy + 4 strides — wake the legs" };
+      session = { ...W.easyRun(30), label:"Easy + Strides", summary:"30min easy + 4 strides — wake the legs" };
+    } else {
+      session = W.easyRun(isDown ? 35 : 40);
     }
-    return W.easyRun(isDown ? 35 : 40);
-  }
-
-  if (slot === "long") {
+  } else if (primary === "long") {
     if (isPeakLong && !isTrail && (event?.goalTime)) {
-      return W.longPaceBlocks(longKm, paces.ep, paces.mp);
+      session = W.longPaceBlocks(longKm, paces.ep, paces.mp);
+    } else {
+      session = W.longEasy(longKm, isTrail, paces.ep);
     }
-    return W.longEasy(longKm, isTrail, paces.ep);
-  }
-
-  if (slot === "workout") {
+  } else if (primary === "workout") {
     if (isTaper && taperWkIdx === 1) {
-      return { ...W.tempo(15), label:"Taper Maintenance Tempo",
+      session = { ...W.tempo(15), label:"Taper Maintenance Tempo",
         summary:"WU 10min · 15min tempo · CD 10min — stay sharp" };
-    }
-    if (isTaper && taperWkIdx >= 2) {
-      return { ...W.easyRun(30), label:"Easy + 3 Fast Strides",
+    } else if (isTaper && taperWkIdx >= 2) {
+      session = { ...W.easyRun(30), label:"Easy + 3 Fast Strides",
         summary:"30min easy + 3×1min fast — final tune-up" };
+    } else {
+      session = pickWorkout(W, wn, dayId, slotIdx, isTrail,
+        profile?.hillAccess || "some hills", isDown);
     }
-    return pickWorkout(W, wn, dayId, slotIdx, isTrail,
-      profile?.hillAccess || "some hills", isDown);
+  } else {
+    session = W.rest();
   }
 
-  return W.rest();
+  // Append strength note when combined with a run
+  if (addStrength) {
+    session = {
+      ...session,
+      label: session.label + " + Strength 🏋",
+      detail: (session.detail || "")
+        + "\n\n──────────────────\n🏋 Strength Training (after your run)\nChat to the Bronies about what you SHOULD be doing — hip strength, single-leg stability, core.",
+    };
+  }
+
+  return session;
 }
+
 
 // ─────────────────────────────────────────────────────────────
 //  BEGINNER PLAN BUILDER
@@ -1210,7 +1255,7 @@ function buildOngoingPlan(profile, dayPlan, fb) {
       const sessions = {};
       let workoutSlotIdx = 0;
       DAYS.forEach(d => {
-        const slot = dayPlan[d.id] || "rest";
+        const slot = normaliseSlot(dayPlan[d.id]);
         sessions[d.id] = buildSlot(slot, W, {
           wn, dayId: d.id,
           slotIdx: slot === "workout" ? workoutSlotIdx : 0,
@@ -1275,8 +1320,8 @@ function buildOngoingPlan(profile, dayPlan, fb) {
 
     // Build sessions for this week — only on run days (those marked as any non-rest slot)
     const runDays  = DAYS.filter(d => {
-      const slot = dayPlan[d.id] || "rest";
-      return slot !== "rest";
+      const slot = normaliseSlot(dayPlan[d.id]);
+      return primarySlot(slot) !== "rest";
     });
 
     // Use the user's selected days, capped to freq
@@ -2302,57 +2347,108 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap }) {
 // ─────────────────────────────────────────────────────────────
 function DayPlanPicker({ value, onChange }) {
   const plan = value || DEFAULT_DAY_PLAN;
-  const slotKeys = ["workout", "easy", "long", "bronies", "strength", "rest"];
+  const RUN_TYPES = ["workout", "easy", "long", "bronies", "rest"];
+  const ALL_SLOTS  = ["workout", "easy", "long", "bronies", "strength", "rest"];
+
+  function toggleDay(dayId, key) {
+    const current      = normaliseSlot(plan[dayId]);
+    const isBroniesDay = dayId === "wed" || dayId === "fri";
+    let next;
+
+    if (key === "rest") {
+      next = ["rest"];
+    } else if (key === "strength") {
+      if (current.includes("strength")) {
+        next = current.filter(k => k !== "strength");
+        if (!next.length) next = ["rest"];
+      } else if (current[0] === "rest") {
+        next = ["strength"];
+      } else {
+        next = [...current.filter(k => k !== "rest"), "strength"];
+      }
+    } else {
+      const keepStrength = current.includes("strength");
+      if (current.includes(key) && current.length === 1) {
+        next = ["rest"];
+      } else if (current.includes(key) && keepStrength) {
+        next = ["strength"];
+      } else {
+        next = keepStrength ? [key, "strength"] : [key];
+      }
+    }
+
+    if (!isBroniesDay) next = next.filter(k => k !== "bronies");
+    if (!next.length) next = ["rest"];
+    const val = next.length === 1 ? next[0] : next;
+    onChange({ ...plan, [dayId]: val });
+  }
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {DAYS.map(d => {
-        const slot = plan[d.id] || "rest";
-        const meta = SLOT_TYPES[slot];
+        const current      = normaliseSlot(plan[d.id]);
+        const primary      = primarySlot(current);
+        const strengthOn   = current.includes("strength");
         const isBroniesDay = d.id === "wed" || d.id === "fri";
-        // Bronies only available on Wed/Fri; if somehow set on another day, reset to easy
-        const availableSlots = slotKeys.filter(k => k !== "bronies" || isBroniesDay);
+        const availableSlots = ALL_SLOTS.filter(k => k !== "bronies" || isBroniesDay);
+
         return (
-          <div key={d.id} style={{display:"flex",alignItems:"center",gap:8,
-            padding:"8px 12px",border:"1px solid var(--rule)",borderRadius:"var(--r)",
-            background:"white"}}>
-            <div style={{width:50,fontSize:12,fontWeight:700,color:"var(--ink3)",
-              letterSpacing:.8,flexShrink:0}}>
-              {d.short}
+          <div key={d.id} style={{border:"1px solid var(--rule)",borderRadius:"var(--r)",
+            background:"white",overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px"}}>
+              <div style={{width:50,fontSize:12,fontWeight:700,color:"var(--ink3)",
+                letterSpacing:.8,flexShrink:0}}>{d.short}</div>
+              <div style={{flex:1,display:"flex",gap:4,flexWrap:"wrap"}}>
+                {availableSlots.map(k => {
+                  const m = SLOT_TYPES[k];
+                  const isStrengthBtn = k === "strength";
+                  const active   = isStrengthBtn ? strengthOn : current.includes(k);
+                  const disabled = isStrengthBtn && primary === "rest" && !strengthOn;
+                  return (
+                    <React.Fragment key={k}>
+                      {isStrengthBtn && <div style={{width:1,background:"var(--rule)",alignSelf:"stretch",margin:"0 2px"}}/>}
+                      <button
+                        onClick={() => toggleDay(d.id, k)}
+                        disabled={disabled}
+                        title={isStrengthBtn ? (active ? "Remove strength" : "Add strength to this day") : m.label}
+                        style={{
+                          display:"flex",alignItems:"center",gap:3,padding:"5px 9px",
+                          fontSize:11,fontWeight:600,cursor:disabled?"not-allowed":"pointer",
+                          borderRadius:14,opacity:disabled?0.35:1,
+                          border:`1.5px solid ${active ? m.color : "var(--rule)"}`,
+                          background: active ? m.color : "white",
+                          color: active ? "white" : "var(--ink3)",
+                          transition:"all .15s",
+                        }}>
+                        <span>{m.icon}</span>
+                        {isStrengthBtn ? (active ? "−Str" : "+Str") : m.label}
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
             </div>
-            <div style={{flex:1,display:"flex",gap:4,flexWrap:"wrap"}}>
-              {availableSlots.map(k => {
-                const m = SLOT_TYPES[k];
-                const active = slot === k;
-                return (
-                  <button key={k} onClick={() => onChange({ ...plan, [d.id]: k })}
-                    style={{display:"flex",alignItems:"center",gap:3,padding:"5px 9px",
-                      fontSize:11,fontWeight:600,cursor:"pointer",
-                      borderRadius:14,
-                      border:`1.5px solid ${active ? m.color : "var(--rule)"}`,
-                      background: active ? m.color : "white",
-                      color: active ? "white" : "var(--ink3)",
-                      transition:"all .15s"}}>
-                    <span>{m.icon}</span>{m.label}
-                  </button>
-                );
-              })}
-            </div>
+            {strengthOn && primary !== "rest" && primary !== "strength" && (
+              <div style={{padding:"3px 12px 7px 70px",fontSize:10,color:"var(--ink4)",fontStyle:"italic"}}>
+                {SLOT_TYPES[primary]?.icon} {SLOT_TYPES[primary]?.label} + 🏋 Strength after your run
+              </div>
+            )}
           </div>
         );
       })}
       <div style={{padding:"10px 12px",background:"var(--bg)",borderRadius:"var(--r)",
         fontSize:11,color:"var(--ink3)",lineHeight:1.6,fontStyle:"italic"}}>
-        <strong style={{color:"var(--ink2)"}}>Workout</strong> = intervals/tempo/hills · 
-        <strong style={{color:"var(--ink2)"}}> Easy</strong> = recovery jog · 
-        <strong style={{color:"var(--ink2)"}}> Long</strong> = the cornerstone session · 
-        <strong style={{color:"var(--ink2)"}}> BRONIES</strong> = 7.99km social run (Wed & Fri only) · 
-        <strong style={{color:"var(--ink2)"}}> Strength</strong> = ask the Bronies · 
+        <strong style={{color:"var(--ink2)"}}>Workout</strong> = intervals/tempo/hills ·
+        <strong style={{color:"var(--ink2)"}}> Easy</strong> = recovery jog ·
+        <strong style={{color:"var(--ink2)"}}> Long</strong> = the cornerstone session ·
+        <strong style={{color:"var(--ink2)"}}> BRONIES</strong> = 7.99km social (Wed &amp; Fri only) ·
+        <strong style={{color:"var(--ink2)"}}> +Str</strong> = add strength to any run day ·
         <strong style={{color:"var(--ink2)"}}> Rest</strong> = full day off
       </div>
     </div>
   );
 }
+
 
 // ─────────────────────────────────────────────────────────────
 //  UI: Bug report + Feedback widget
@@ -2865,230 +2961,6 @@ function DisclaimerModal({ onAccept, onDecline }) {
 
 // ─────────────────────────────────────────────────────────────
 //  UI: Onboarding wizard
-// ─────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────
-//  EventScanner — must be a real component so useState is valid
-// ─────────────────────────────────────────────────────────────
-function EventScanner({ upEvent }) {
-  const [scanUrl,      setScanUrl]      = useState("");
-  const [scanning,     setScanning]     = useState(false);
-  const [scanError,    setScanError]    = useState(null);
-  const [scanDone,     setScanDone]     = useState(false);
-  const [multiOptions, setMultiOptions] = useState(null);
-
-  function applyParsed(parsed) {
-    if (parsed.name)       upEvent("name",       parsed.name);
-    if (parsed.date)       upEvent("date",       parsed.date);
-    if (parsed.distance)   upEvent("distance",   String(parsed.distance));
-    if (parsed.location)   upEvent("location",   parsed.location);
-    if (parsed.type)       upEvent("type",       parsed.type);
-    if (parsed.elevationM) {
-      const m = parseInt(parsed.elevationM) || 0;
-      upEvent("elevationM", m);
-      upEvent("elevation",  bucketElevation(m, parseFloat(parsed.distance) || 30));
-    }
-    if (parsed.trailType)  upEvent("trailType",  parsed.trailType);
-    upEvent("aidStations", Array.isArray(parsed.aidStations) ? parsed.aidStations : []);
-    upEvent("url", scanUrl.trim());
-    setScanDone(true);
-    setMultiOptions(null);
-  }
-
-  async function runScan() {
-    const url = scanUrl.trim();
-    if (!url) return;
-    setScanning(true); setScanError(null); setScanDone(false); setMultiOptions(null);
-    try {
-      const SYSTEM = `You are an assistant that extracts structured running event information from a webpage.
-You MUST respond with ONLY a JSON object — no preamble, no markdown fences, no explanation.
-
-If the page contains MULTIPLE race distances (e.g. 10km, 21km, 50km, 100km options), return:
-{
-  "multiple": true,
-  "variants": [
-    {
-      "label": "50km Trail",
-      "distance": "50",
-      "elevationM": 2800,
-      "type": "trail",
-      "trailType": "Single-track through alpine terrain",
-      "name": "Race Name 50km",
-      "date": "YYYY-MM-DD",
-      "location": "City, Country",
-      "aidStations": [{ "name": "Station Name", "km": 23, "drop": true }]
-    }
-  ]
-}
-
-If there is only ONE distance, return:
-{
-  "multiple": false,
-  "name": "Full event name",
-  "date": "YYYY-MM-DD",
-  "distance": "numeric km as a string e.g. 42.2",
-  "location": "City, State/Country",
-  "type": "trail or road or mixed",
-  "elevationM": 0,
-  "trailType": "1-2 sentence description of terrain and course character",
-  "goalTime": null,
-  "aidStations": [{ "name": "Station Name", "km": 23, "drop": true }]
-}
-
-For aidStations: list each in order by km from start. drop=true if it is a drop bag point. Return [] if none found.`;
-
-      // Try URL document source first (server-side fetch, no CORS)
-      const body = {
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        system: SYSTEM,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "text", text: "Extract the running event information from this webpage and return JSON:" },
-            { type: "document", source: { type: "url", url } },
-          ],
-        }],
-      };
-
-      let res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      let d = await res.json();
-
-      // If url document source fails (not all deployments support it),
-      // fall back to asking Claude to use its knowledge of the event
-      if (!res.ok || !d.content?.length) {
-        const fallbackBody = {
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          system: SYSTEM,
-          messages: [{
-            role: "user",
-            content: `Look up this running event URL and extract the information. URL: ${url}\n\nReturn only the JSON.`,
-          }],
-        };
-        res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fallbackBody),
-        });
-        d = await res.json();
-      }
-
-      if (!res.ok) {
-        const msg = d?.error?.message || JSON.stringify(d?.error) || `HTTP ${res.status}`;
-        throw new Error(`API error: ${msg}`);
-      }
-
-      const text = (d.content || [])
-        .map(b => b.type === "text" ? b.text : "")
-        .join("\n")
-        .replace(/```json|```/g, "")
-        .trim();
-
-      if (!text) throw new Error(`No text in API response. Block types: ${(d.content||[]).map(b=>b.type).join(", ")}`);
-
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error(`Couldn't find JSON. Response started with: ${text.slice(0,100)}`);
-
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.multiple && parsed.variants?.length > 1) {
-        setMultiOptions(parsed.variants);
-      } else if (parsed.variants?.length === 1) {
-        applyParsed(parsed.variants[0]);
-      } else {
-        applyParsed(parsed);
-      }
-    } catch(e) {
-      setScanError(e.message || "Scan failed — fill in manually");
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  return (
-    <div style={{marginBottom:20,padding:"14px 16px",background:"#f0f4ff",
-      border:"1.5px solid #c5d3f5",borderRadius:"var(--r)"}}>
-      <div style={{fontSize:12,fontWeight:700,color:"#1a56db",letterSpacing:.8,
-        textTransform:"uppercase",marginBottom:8}}>🔍 Scan Event Page</div>
-      <div style={{fontSize:12,color:"var(--ink3)",marginBottom:10,lineHeight:1.5}}>
-        Paste the event URL and tap Scan — we'll fill in the details automatically.
-      </div>
-      <div style={{display:"flex",gap:8}}>
-        <input
-          value={scanUrl}
-          onChange={e => { setScanUrl(e.target.value); setScanDone(false); setScanError(null); setMultiOptions(null); }}
-          placeholder="https://eventwebsite.com.au/race"
-          className="inp"
-          style={{flex:1,fontSize:13}}
-        />
-        <button
-          onClick={runScan}
-          disabled={scanning || !scanUrl.trim()}
-          className="btn btn-p"
-          style={{flexShrink:0,minWidth:72,opacity:scanning||!scanUrl.trim()?0.6:1}}>
-          {scanning ? "…" : "Scan"}
-        </button>
-      </div>
-
-      {scanning && (
-        <div style={{marginTop:10,fontSize:12,color:"#1a56db",fontStyle:"italic",
-          display:"flex",alignItems:"center",gap:6}}>
-          <span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>
-          Reading event page…
-        </div>
-      )}
-
-      {multiOptions && (
-        <div style={{marginTop:12}}>
-          <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",marginBottom:8}}>
-            This event has multiple distances — which one are you doing?
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {multiOptions.map((opt, i) => (
-              <button key={i} onClick={() => applyParsed(opt)}
-                style={{textAlign:"left",padding:"10px 14px",borderRadius:"var(--r)",
-                  border:"1.5px solid #c5d3f5",background:"white",cursor:"pointer",
-                  display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:700,color:"var(--ink)"}}>
-                    {opt.label || `${opt.distance}km`}
-                  </div>
-                  {opt.elevationM > 0 && (
-                    <div style={{fontSize:11,color:"var(--ink4)",marginTop:1}}>
-                      {opt.elevationM.toLocaleString()}m elevation · {opt.type}
-                    </div>
-                  )}
-                </div>
-                <span style={{fontSize:18,fontFamily:"var(--mono)",fontWeight:700,
-                  color:"#1a56db"}}>{opt.distance}km</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {scanDone && !scanError && (
-        <div style={{marginTop:10,padding:"8px 12px",background:"#e8f5e9",
-          border:"1px solid #4CAF50",borderRadius:"var(--r)",
-          fontSize:12,color:"#1a472a",fontWeight:600}}>
-          ✓ Fields filled in below — check and adjust anything that looks off
-        </div>
-      )}
-      {scanError && (
-        <div style={{marginTop:10,padding:"8px 12px",background:"#fce8e8",
-          border:"1px solid #ef5350",borderRadius:"var(--r)",
-          fontSize:12,color:"#c0392b"}}>
-          ⚠ {scanError}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function OnboardingWizard({ onComplete, onCancel, initial }) {
   const [step, setStep] = useState(1);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
@@ -3224,8 +3096,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
             The race you're targeting and the time you want
           </div>
 
-          {/* ── Event URL Scanner ── */}
-          <EventScanner upEvent={upEvent} />
+
 
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             <div>
@@ -3718,18 +3589,21 @@ function HangoutView({ profile, plan, onSelectWeek }) {
         </div>
         <div className="card" style={{padding:"14px 16px"}}>
           {DAYS.map(d => {
-            const slot = profile?.dayPlan?.[d.id] || "rest";
-            const meta = SLOT_TYPES[slot];
-            const isRest = slot === "rest";
+            const slots   = normaliseSlot(profile?.dayPlan?.[d.id]);
+            const primary = primarySlot(slots);
+            const withStr = hasStrength(slots);
+            const meta    = SLOT_TYPES[primary] || SLOT_TYPES.rest;
+            const isRest  = primary === "rest";
             return (
               <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,
                 padding:"8px 0",borderBottom:"1px solid var(--rule)",opacity:isRest?0.5:1}}>
                 <div style={{width:50,fontSize:12,fontWeight:700,color:"var(--ink3)",letterSpacing:.8}}>
                   {d.short}
                 </div>
-                <div style={{fontSize:18}}>{meta.icon}</div>
+                <div style={{fontSize:18}}>{meta.icon}{withStr && !isRest ? "🏋" : ""}</div>
                 <div style={{fontSize:13,fontWeight:isRest?400:600,color:isRest?"var(--ink4)":"var(--ink)"}}>
                   {meta.label === "BRONIES" ? "BRONIES 7.99km" : meta.label}
+                  {withStr && !isRest ? " + Strength" : ""}
                 </div>
               </div>
             );
