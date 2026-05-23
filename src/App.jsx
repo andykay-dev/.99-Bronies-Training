@@ -1889,7 +1889,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
               cursor:isRest&&!onDaySlotChange?"default":"pointer",gap:10}}
             onClick={() => {
               if (!isRest) setOpen(o=>!o);
-              else if (onDaySlotChange) setOpen(o=>!o); // rest days open to show change options
+              else if (onDaySlotChange) setOpen(o=>!o);
             }}>
             <span style={{fontSize:18,flexShrink:0}}>{slotMeta.icon}</span>
             <div style={{flex:1,minWidth:0}}>
@@ -1901,21 +1901,31 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
               <div style={{fontSize:11,color:"var(--ink3)",marginTop:1,
                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
                 textDecoration: isPast && !isRest ? "line-through" : "none"}}>{session.summary}</div>
-            </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              {isToday && !isRest && (
-                <div style={{fontSize:10,fontWeight:700,color:"white",background:"#4CAF50",
-                  borderRadius:10,padding:"2px 7px",marginBottom:3,letterSpacing:.3}}>TODAY</div>
-              )}
-              {isPast && !isRest && completionBadge && (
-                <div style={{fontSize:9,fontWeight:700,color:completionBadge.col,background:completionBadge.bg,
-                  borderRadius:10,padding:"2px 7px",marginBottom:3,letterSpacing:.3,border:`1px solid ${completionBadge.col}`}}>
-                  {completionBadge.label}
+
+              {/* Completion buttons — prominent inline buttons on past/today sessions */}
+              {showCompletion && (
+                <div style={{display:"flex",gap:5,marginTop:8}} onClick={e => e.stopPropagation()}>
+                  {COMPLETION_OPTS.map(o => (
+                    <button key={o.value} onClick={() => onCompletion(completionKey, o.value)}
+                      style={{
+                        padding:"5px 11px",fontSize:11,fontWeight:700,cursor:"pointer",
+                        borderRadius:20,
+                        border:`2px solid ${completionVal===o.value ? o.col : "#bbb"}`,
+                        background: completionVal===o.value ? o.col : "white",
+                        color: completionVal===o.value ? "white" : "#666",
+                        transition:"all .15s",
+                        boxShadow: completionVal===o.value ? "none" : "0 1px 3px rgba(0,0,0,0.08)",
+                      }}>
+                      {o.label}
+                    </button>
+                  ))}
                 </div>
               )}
-              {isPast && !isRest && !completionBadge && (
-                <div style={{fontSize:9,fontWeight:600,color:"var(--ink4)",background:"var(--bg)",
-                  borderRadius:10,padding:"2px 7px",marginBottom:3,letterSpacing:.3}}>you do this?</div>
+            </div>
+            <div style={{textAlign:"right",flexShrink:0,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
+              {isToday && !isRest && (
+                <div style={{fontSize:10,fontWeight:700,color:"white",background:"#4CAF50",
+                  borderRadius:10,padding:"2px 7px",letterSpacing:.3}}>TODAY</div>
               )}
               {session.distance > 0 && (
                 <div style={{fontSize:16,fontWeight:700,color:"var(--ink)",
@@ -1927,7 +1937,6 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
               {!isRest && <div style={{fontSize:11,color:"var(--ink4)"}}>{open?"▲":"▼"}</div>}
             </div>
           </div>
-
           {open && (
             <div style={{padding:"0 14px 14px"}}>
               <hr className="rule" style={{margin:"0 0 12px"}}/>
@@ -1958,26 +1967,6 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                 <>
                   <p style={{fontSize:13,color:"var(--ink2)",lineHeight:1.75,
                     whiteSpace:"pre-line",marginBottom:12}}>{session.detail}</p>
-
-                  {/* Completion tracker — only past + today non-rest sessions */}
-                  {showCompletion && (
-                    <div style={{marginBottom:12,padding:"10px 12px",background:"var(--bg)",
-                      borderRadius:"var(--r)",border:"1px solid var(--rule)"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",letterSpacing:.8,
-                        textTransform:"uppercase",marginBottom:8}}>You do this?</div>
-                      <div style={{display:"flex",gap:8}}>
-                        {COMPLETION_OPTS.map(o => (
-                          <button key={o.value} onClick={() => onCompletion(completionKey, o.value)}
-                            style={{flex:1,padding:"9px 4px",fontSize:12,fontWeight:600,cursor:"pointer",
-                              borderRadius:"var(--r)",border:`1.5px solid ${completionVal===o.value?o.col:"var(--rule)"}`,
-                              background:completionVal===o.value?o.bg:"white",
-                              color:completionVal===o.value?o.col:"var(--ink3)",transition:"all .15s"}}>
-                            {o.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
 
                   <GarminBlock session={session} paces={paces}/>
 
@@ -2197,7 +2186,7 @@ function findSessionByWtype(week, wtype) {
   return null;
 }
 
-function PlanOverview({ plan, onSelectWeek, feedbackMap }) {
+function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onCompletion }) {
   const [filter, setFilter] = useState("all");
   if (!plan.length) return (
     <div style={{padding:"48px 16px",textAlign:"center"}}>
@@ -2323,46 +2312,67 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap }) {
                 </div>
                 <span style={{color:"var(--ink4)",fontSize:11}}>›</span>
               </div>
-              <div style={{padding:"0 var(--pad-x) 10px 52px"}}>
-                {filter === "all" ? (
-                  <div style={{fontSize:11,color:"var(--ink3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {DAYS.filter(d => w.sessions?.[d.id] && w.sessions[d.id].wtype !== "rest")
-                      .slice(0, 4)
-                      .map((d, idx) => {
-                        const past  = dayIsPast(w.startDate, d.index ?? DAYS.indexOf(d));
-                        const today = dayIsToday(w.startDate, d.index ?? DAYS.indexOf(d));
-                        return (
-                          <span key={d.id} style={{textDecoration: past ? "line-through" : "none",
-                            opacity: past ? 0.45 : 1,
-                            background: today ? "#E8F5E9" : "transparent",
-                            padding: today ? "1px 4px" : undefined,
-                            borderRadius: today ? 4 : undefined,
-                            fontWeight: today ? 700 : undefined}}>
-                            <span style={{color: today ? "#2E7D32" : SLOT_TYPES[w.sessions[d.id].wtype === "long" ? "long" : w.sessions[d.id].wtype === "bronies" ? "bronies" : w.sessions[d.id].wtype === "easy" ? "easy" : "workout"]?.color || "var(--ink3)", fontWeight:600}}>
-                              {d.short}{today ? " ◀" : ""}
-                            </span>
-                            {" "}{w.sessions[d.id].label}
-                            {idx < 3 ? "  ·  " : ""}
-                          </span>
-                        );
-                      })}
-                  </div>
-                ) : matched ? (
-                  <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
-                    <span style={{fontSize:9,fontWeight:700,color:"white",
-                      background:SLOT_TYPES[cfg.slot]?.color || "var(--ink3)",
-                      padding:"2px 6px",borderRadius:3,letterSpacing:.5,flexShrink:0,marginTop:2}}>
-                      {matched.dayLabel}
-                    </span>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600,color:"var(--ink)",
-                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{matched.session.label}</div>
-                      <div style={{fontSize:11,color:"var(--ink3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{matched.session.summary}</div>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{fontSize:11,color:"var(--ink4)",fontStyle:"italic"}}>—</div>
-                )}
+              {/* Per-day rows with completion buttons */}
+              <div style={{padding:"0 var(--pad-x) 10px 52px",display:"flex",flexDirection:"column",gap:4}}>
+                {DAYS.filter(d => w.sessions?.[d.id] && w.sessions[d.id].wtype !== "rest")
+                  .slice(0, 4)
+                  .map((d, idx) => {
+                    const dayIdx  = DAYS.indexOf(d);
+                    const past    = dayIsPast(w.startDate, dayIdx);
+                    const today   = dayIsToday(w.startDate, dayIdx);
+                    const ck      = `${w.weekNum}:${d.id}`;
+                    const cv      = completionMap?.[ck] || null;
+                    const eligible = (past || today) && completionMap && onCompletion;
+                    const slotColor = SLOT_TYPES[
+                      w.sessions[d.id].wtype === "long" ? "long"
+                      : w.sessions[d.id].wtype === "bronies" ? "bronies"
+                      : w.sessions[d.id].wtype === "easy" ? "easy"
+                      : "workout"]?.color || "var(--ink3)";
+                    return (
+                      <div key={d.id} style={{display:"flex",alignItems:"center",gap:6,
+                        opacity: past && !cv ? 0.65 : 1}}>
+                        {/* Day label + session name */}
+                        <span style={{
+                          fontSize:11,color:today?"#2E7D32":slotColor,fontWeight:700,
+                          flexShrink:0,minWidth:28,
+                          background: today ? "#E8F5E9" : "transparent",
+                          padding: today ? "1px 4px" : undefined,
+                          borderRadius: today ? 4 : undefined,
+                          textDecoration: past && cv === "nup_soft" ? "line-through" : "none",
+                        }}>
+                          {d.short}
+                        </span>
+                        <span style={{fontSize:11,color:"var(--ink3)",flex:1,minWidth:0,
+                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+                          textDecoration: past && cv === "nup_soft" ? "line-through" : "none"}}>
+                          {w.sessions[d.id].label}
+                        </span>
+                        {/* Yeah/Nup buttons — only past + today */}
+                        {eligible && (
+                          <div style={{display:"flex",gap:3,flexShrink:0}}
+                            onClick={e => e.stopPropagation()}>
+                            <button onClick={() => onCompletion(ck, "yeah_broo")}
+                              style={{padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",
+                                borderRadius:12,border:`1.5px solid ${cv==="yeah_broo"?"#1a472a":"#ccc"}`,
+                                background:cv==="yeah_broo"?"#1a472a":"white",
+                                color:cv==="yeah_broo"?"white":"#888",transition:"all .12s"}}>
+                              💪
+                            </button>
+                            <button onClick={() => onCompletion(ck, "nup_soft")}
+                              style={{padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",
+                                borderRadius:12,border:`1.5px solid ${cv==="nup_soft"?"#c0392b":"#ccc"}`,
+                                background:cv==="nup_soft"?"#c0392b":"white",
+                                color:cv==="nup_soft"?"white":"#888",transition:"all .12s"}}>
+                              😬
+                            </button>
+                          </div>
+                        )}
+                        {cv === "yeah_broo" && (
+                          <span style={{fontSize:9,fontWeight:700,color:"#1a472a",flexShrink:0}}>✓</span>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           );
@@ -4519,7 +4529,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                <PlanOverview plan={planWithOverrides} onSelectWeek={setSelWeek} feedbackMap={feedbackMap}/>
+                <PlanOverview plan={planWithOverrides} onSelectWeek={setSelWeek} feedbackMap={feedbackMap} completionMap={completionMap} onCompletion={handleCompletion}/>
               </>
             )}
           </div>
