@@ -2866,6 +2866,196 @@ function DisclaimerModal({ onAccept, onDecline }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Onboarding wizard
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  EventScanner — must be a real component so useState is valid
+// ─────────────────────────────────────────────────────────────
+function EventScanner({ upEvent }) {
+  const [scanUrl,      setScanUrl]      = useState("");
+  const [scanning,     setScanning]     = useState(false);
+  const [scanError,    setScanError]    = useState(null);
+  const [scanDone,     setScanDone]     = useState(false);
+  const [multiOptions, setMultiOptions] = useState(null);
+
+  function applyParsed(parsed) {
+    if (parsed.name)       upEvent("name",       parsed.name);
+    if (parsed.date)       upEvent("date",       parsed.date);
+    if (parsed.distance)   upEvent("distance",   String(parsed.distance));
+    if (parsed.location)   upEvent("location",   parsed.location);
+    if (parsed.type)       upEvent("type",       parsed.type);
+    if (parsed.elevationM) {
+      const m = parseInt(parsed.elevationM) || 0;
+      upEvent("elevationM", m);
+      upEvent("elevation",  bucketElevation(m, parseFloat(parsed.distance) || 30));
+    }
+    if (parsed.trailType)  upEvent("trailType",  parsed.trailType);
+    upEvent("aidStations", Array.isArray(parsed.aidStations) ? parsed.aidStations : []);
+    upEvent("url", scanUrl.trim());
+    setScanDone(true);
+    setMultiOptions(null);
+  }
+
+  async function runScan() {
+    const url = scanUrl.trim();
+    if (!url) return;
+    setScanning(true); setScanError(null); setScanDone(false); setMultiOptions(null);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          system: `You are an assistant that extracts structured running event information from a webpage.
+You MUST respond with ONLY a JSON object — no preamble, no markdown fences, no explanation.
+
+If the page contains MULTIPLE race distances (e.g. 10km, 21km, 50km, 100km options), return:
+{
+  "multiple": true,
+  "variants": [
+    {
+      "label": "50km Trail",
+      "distance": "50",
+      "elevationM": 2800,
+      "type": "trail",
+      "trailType": "Single-track through alpine terrain",
+      "name": "Race Name 50km",
+      "date": "YYYY-MM-DD",
+      "location": "City, Country",
+      "aidStations": [
+        { "name": "Station Name", "km": 23, "drop": true }
+      ]
+    }
+  ]
+}
+
+If there is only ONE distance, return:
+{
+  "multiple": false,
+  "name": "Full event name",
+  "date": "YYYY-MM-DD",
+  "distance": "numeric km as a string e.g. 42.2",
+  "location": "City, State/Country",
+  "type": "trail" | "road" | "mixed",
+  "elevationM": numeric metres of total elevation gain or 0,
+  "trailType": "1-2 sentence description of terrain and course character",
+  "goalTime": null,
+  "aidStations": [
+    { "name": "Station Name", "km": 23, "drop": true }
+  ]
+}
+
+For aidStations: list each checkpoint in order by km. "km" is the distance from the start. "drop" is true if the event page mentions it as a drop bag point. If no aid station info is found, return an empty array []. For road races with no meaningful aid station data return [].`,
+          messages: [{
+            role: "user",
+            content: `Search for and read this running event page, then return the structured JSON:\n${url}`
+          }],
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error?.message || "API error");
+      const text = (d.content || [])
+        .map(b => b.type === "text" ? b.text : "")
+        .join("\n")
+        .replace(/```json|```/g, "")
+        .trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Couldn't read the event page — try filling in manually");
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.multiple && parsed.variants?.length > 1) {
+        setMultiOptions(parsed.variants);
+      } else if (parsed.variants?.length === 1) {
+        applyParsed(parsed.variants[0]);
+      } else {
+        applyParsed(parsed);
+      }
+    } catch(e) {
+      setScanError(e.message || "Scan failed — fill in manually");
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  return (
+    <div style={{marginBottom:20,padding:"14px 16px",background:"#f0f4ff",
+      border:"1.5px solid #c5d3f5",borderRadius:"var(--r)"}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#1a56db",letterSpacing:.8,
+        textTransform:"uppercase",marginBottom:8}}>🔍 Scan Event Page</div>
+      <div style={{fontSize:12,color:"var(--ink3)",marginBottom:10,lineHeight:1.5}}>
+        Paste the event URL and tap Scan — we'll fill in the details automatically.
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <input
+          value={scanUrl}
+          onChange={e => { setScanUrl(e.target.value); setScanDone(false); setScanError(null); setMultiOptions(null); }}
+          placeholder="https://eventwebsite.com.au/race"
+          className="inp"
+          style={{flex:1,fontSize:13}}
+        />
+        <button
+          onClick={runScan}
+          disabled={scanning || !scanUrl.trim()}
+          className="btn btn-p"
+          style={{flexShrink:0,minWidth:72,opacity:scanning||!scanUrl.trim()?0.6:1}}>
+          {scanning ? "…" : "Scan"}
+        </button>
+      </div>
+
+      {scanning && (
+        <div style={{marginTop:10,fontSize:12,color:"#1a56db",fontStyle:"italic",
+          display:"flex",alignItems:"center",gap:6}}>
+          <span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>
+          Reading event page…
+        </div>
+      )}
+
+      {multiOptions && (
+        <div style={{marginTop:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",marginBottom:8}}>
+            This event has multiple distances — which one are you doing?
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {multiOptions.map((opt, i) => (
+              <button key={i} onClick={() => applyParsed(opt)}
+                style={{textAlign:"left",padding:"10px 14px",borderRadius:"var(--r)",
+                  border:"1.5px solid #c5d3f5",background:"white",cursor:"pointer",
+                  display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"var(--ink)"}}>
+                    {opt.label || `${opt.distance}km`}
+                  </div>
+                  {opt.elevationM > 0 && (
+                    <div style={{fontSize:11,color:"var(--ink4)",marginTop:1}}>
+                      {opt.elevationM.toLocaleString()}m elevation · {opt.type}
+                    </div>
+                  )}
+                </div>
+                <span style={{fontSize:18,fontFamily:"var(--mono)",fontWeight:700,
+                  color:"#1a56db"}}>{opt.distance}km</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {scanDone && !scanError && (
+        <div style={{marginTop:10,padding:"8px 12px",background:"#e8f5e9",
+          border:"1px solid #4CAF50",borderRadius:"var(--r)",
+          fontSize:12,color:"#1a472a",fontWeight:600}}>
+          ✓ Fields filled in below — check and adjust anything that looks off
+        </div>
+      )}
+      {scanError && (
+        <div style={{marginTop:10,padding:"8px 12px",background:"#fce8e8",
+          border:"1px solid #ef5350",borderRadius:"var(--r)",
+          fontSize:12,color:"#c0392b"}}>
+          ⚠ {scanError}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OnboardingWizard({ onComplete, onCancel, initial }) {
   const [step, setStep] = useState(1);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
@@ -3002,196 +3192,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
           </div>
 
           {/* ── Event URL Scanner ── */}
-          {(() => {
-            const [scanUrl,      setScanUrl]      = useState("");
-            const [scanning,     setScanning]     = useState(false);
-            const [scanError,    setScanError]    = useState(null);
-            const [scanDone,     setScanDone]     = useState(false);
-            const [multiOptions, setMultiOptions] = useState(null); // array of event variants when page has multiple distances
-
-            function applyParsed(parsed) {
-              if (parsed.name)       upEvent("name",       parsed.name);
-              if (parsed.date)       upEvent("date",       parsed.date);
-              if (parsed.distance)   upEvent("distance",   String(parsed.distance));
-              if (parsed.location)   upEvent("location",   parsed.location);
-              if (parsed.type)       upEvent("type",       parsed.type);
-              if (parsed.elevationM) {
-                const m = parseInt(parsed.elevationM) || 0;
-                upEvent("elevationM", m);
-                upEvent("elevation",  bucketElevation(m, parseFloat(parsed.distance) || 30));
-              }
-              if (parsed.trailType)  upEvent("trailType",  parsed.trailType);
-              upEvent("aidStations", Array.isArray(parsed.aidStations) ? parsed.aidStations : []);
-              upEvent("url", scanUrl.trim());
-              setScanDone(true);
-              setMultiOptions(null);
-            }
-
-            async function runScan() {
-              const url = scanUrl.trim();
-              if (!url) return;
-              setScanning(true); setScanError(null); setScanDone(false); setMultiOptions(null);
-              try {
-                const res = await fetch("https://api.anthropic.com/v1/messages", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    model: "claude-sonnet-4-20250514",
-                    max_tokens: 2000,
-                    tools: [{ type: "web_search_20250305", name: "web_search" }],
-                    system: `You are an assistant that extracts structured running event information from a webpage.
-You MUST respond with ONLY a JSON object — no preamble, no markdown fences, no explanation.
-
-If the page contains MULTIPLE race distances (e.g. 10km, 21km, 50km, 100km options), return:
-{
-  "multiple": true,
-  "variants": [
-    {
-      "label": "50km Trail",
-      "distance": "50",
-      "elevationM": 2800,
-      "type": "trail",
-      "trailType": "Single-track through alpine terrain",
-      "name": "Race Name 50km",
-      "date": "YYYY-MM-DD",
-      "location": "City, Country",
-      "aidStations": [
-        { "name": "Station Name", "km": 23, "drop": true }
-      ]
-    }
-  ]
-}
-
-If there is only ONE distance, return:
-{
-  "multiple": false,
-  "name": "Full event name",
-  "date": "YYYY-MM-DD",
-  "distance": "numeric km as a string e.g. 42.2",
-  "location": "City, State/Country",
-  "type": "trail" | "road" | "mixed",
-  "elevationM": numeric metres of total elevation gain or 0,
-  "trailType": "1-2 sentence description of terrain and course character",
-  "goalTime": null,
-  "aidStations": [
-    { "name": "Station Name", "km": 23, "drop": true }
-  ]
-}
-
-For aidStations: list each checkpoint in order by km. "km" is the distance from the start. "drop" is true if the event page mentions it as a drop bag point. If no aid station info is found, return an empty array []. For road races with no meaningful aid station data (e.g. water tables every 5km) return [].`,
-                    messages: [{
-                      role: "user",
-                      content: `Search for and read this running event page, then return the structured JSON:\n${url}`
-                    }],
-                  }),
-                });
-                const d = await res.json();
-                if (!res.ok) throw new Error(d?.error?.message || "API error");
-                const text = (d.content || [])
-                  .map(b => b.type === "text" ? b.text : "")
-                  .join("\n")
-                  .replace(/```json|```/g, "")
-                  .trim();
-                const jsonMatch = text.match(/\{[\s\S]*\}/);
-                if (!jsonMatch) throw new Error("Couldn't read the event page — try filling in manually");
-                const parsed = JSON.parse(jsonMatch[0]);
-
-                if (parsed.multiple && parsed.variants?.length > 1) {
-                  // Multiple distances found — show picker
-                  setMultiOptions(parsed.variants);
-                } else if (parsed.variants?.length === 1) {
-                  // Only one variant returned in the array — apply it directly
-                  applyParsed(parsed.variants[0]);
-                } else {
-                  applyParsed(parsed);
-                }
-              } catch(e) {
-                setScanError(e.message || "Scan failed — fill in manually");
-              } finally {
-                setScanning(false);
-              }
-            }
-
-            return (
-              <div style={{marginBottom:20,padding:"14px 16px",background:"#f0f4ff",
-                border:"1.5px solid #c5d3f5",borderRadius:"var(--r)"}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#1a56db",letterSpacing:.8,
-                  textTransform:"uppercase",marginBottom:8}}>🔍 Scan Event Page</div>
-                <div style={{fontSize:12,color:"var(--ink3)",marginBottom:10,lineHeight:1.5}}>
-                  Paste the event URL and tap Scan — we'll fill in the details automatically.
-                </div>
-                <div style={{display:"flex",gap:8}}>
-                  <input
-                    value={scanUrl}
-                    onChange={e => { setScanUrl(e.target.value); setScanDone(false); setScanError(null); setMultiOptions(null); }}
-                    placeholder="https://eventwebsite.com.au/race"
-                    className="inp"
-                    style={{flex:1,fontSize:13}}
-                  />
-                  <button
-                    onClick={runScan}
-                    disabled={scanning || !scanUrl.trim()}
-                    className="btn btn-p"
-                    style={{flexShrink:0,minWidth:72,opacity:scanning||!scanUrl.trim()?0.6:1}}>
-                    {scanning ? "…" : "Scan"}
-                  </button>
-                </div>
-
-                {scanning && (
-                  <div style={{marginTop:10,fontSize:12,color:"#1a56db",fontStyle:"italic",
-                    display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>
-                    Reading event page…
-                  </div>
-                )}
-
-                {/* Multiple distance picker */}
-                {multiOptions && (
-                  <div style={{marginTop:12}}>
-                    <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",marginBottom:8}}>
-                      This event has multiple distances — which one are you doing?
-                    </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                      {multiOptions.map((opt, i) => (
-                        <button key={i} onClick={() => applyParsed(opt)}
-                          style={{textAlign:"left",padding:"10px 14px",borderRadius:"var(--r)",
-                            border:"1.5px solid #c5d3f5",background:"white",cursor:"pointer",
-                            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <div>
-                            <div style={{fontSize:13,fontWeight:700,color:"var(--ink)"}}>
-                              {opt.label || `${opt.distance}km`}
-                            </div>
-                            {opt.elevationM > 0 && (
-                              <div style={{fontSize:11,color:"var(--ink4)",marginTop:1}}>
-                                {opt.elevationM.toLocaleString()}m elevation · {opt.type}
-                              </div>
-                            )}
-                          </div>
-                          <span style={{fontSize:18,fontFamily:"var(--mono)",fontWeight:700,
-                            color:"#1a56db"}}>{opt.distance}km</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {scanDone && !scanError && (
-                  <div style={{marginTop:10,padding:"8px 12px",background:"#e8f5e9",
-                    border:"1px solid #4CAF50",borderRadius:"var(--r)",
-                    fontSize:12,color:"#1a472a",fontWeight:600}}>
-                    ✓ Fields filled in below — check and adjust anything that looks off
-                  </div>
-                )}
-                {scanError && (
-                  <div style={{marginTop:10,padding:"8px 12px",background:"#fce8e8",
-                    border:"1px solid #ef5350",borderRadius:"var(--r)",
-                    fontSize:12,color:"#c0392b"}}>
-                    ⚠ {scanError}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          <EventScanner upEvent={upEvent} />
 
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             <div>
