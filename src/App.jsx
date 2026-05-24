@@ -371,7 +371,7 @@ function hasStrength(slots) {
 }
 
 // Workout subtype keys — treated as "workout" for planning purposes but force a specific session type
-const WORKOUT_SUBTYPES = ["hills", "fartlek", "intervals"];
+const WORKOUT_SUBTYPES = ["hills", "fartlek", "intervals", "tempo"];
 function isWorkoutSlot(p) {
   return p === "workout" || WORKOUT_SUBTYPES.includes(p);
 }
@@ -963,10 +963,11 @@ function pickWorkout(W, wn, dayId, slotIdx, isTrail, hillAccess, isDown, forcedS
   if (forcedSubtype === "hills") {
     return hasHills
       ? W.hillReps(Math.min(8, 4 + Math.floor(wn / 4)))
-      : W.fartlek(35); // no hills available — substitute fartlek
+      : W.fartlek(35);
   }
-  if (forcedSubtype === "fartlek") return W.fartlek(Math.min(45, 30 + Math.floor(wn / 3) * 3));
+  if (forcedSubtype === "fartlek")   return W.fartlek(Math.min(45, 30 + Math.floor(wn / 3) * 3));
   if (forcedSubtype === "intervals") return W.intervals(Math.min(6, 3 + Math.floor(wn / 4)));
+  if (forcedSubtype === "tempo")     return W.tempo(Math.min(30, 15 + Math.floor(wn / 3) * 2));
 
   if (isDown) return W.fartlek(30);
 
@@ -2033,35 +2034,36 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                         session.wtype === "fartlek" || session.wtype === "hills" ||
                         session.wtype === "onoff" || session.wtype === "overunder" ||
                         session.wtype === "ladder" || session.wtype === "progression") && onDaySlotChange && (
-                        <div>
-                          <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
-                            letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
-                            Swap workout type
+                          <div style={{marginBottom:6}}>
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
+                              letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
+                              Swap workout type
+                            </div>
+                            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                              {[
+                                { key:"intervals", label:"Intervals", icon:"⚡", desc:"Timed reps with structured recovery" },
+                                { key:"tempo",     label:"Tempo",     icon:"🔥", desc:"Sustained comfortably-hard effort" },
+                                { key:"fartlek",   label:"Fartlek",   icon:"🌀", desc:"Unstructured speed play — run by feel" },
+                                { key:"hills",     label:"Hills",     icon:"⛰", desc:"Uphill reps — build power and strength" },
+                              ].map(wt => {
+                                const isActive = session.wtype === wt.key ||
+                                  (wt.key === "intervals" && ["onoff","overunder","ladder","progression"].includes(session.wtype));
+                                return (
+                                  <button key={wt.key}
+                                    onClick={() => onDaySlotChange(dayId, "workout", wt.key)}
+                                    title={wt.desc}
+                                    style={{padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",
+                                      borderRadius:"var(--r)",
+                                      border:`2px solid ${isActive ? SLOT_TYPES.workout.color : "var(--rule)"}`,
+                                      background: isActive ? SLOT_TYPES.workout.color : "white",
+                                      color: isActive ? "white" : "var(--ink3)",
+                                      transition:"all .15s"}}>
+                                    {wt.icon} {wt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                            {[
-                              { key:"hills",     label:"Hills",     icon:"⛰",  desc:"Uphill reps — build power and strength" },
-                              { key:"fartlek",   label:"Fartlek",   icon:"🌀",  desc:"Unstructured speed play — run by feel" },
-                              { key:"intervals", label:"Intervals", icon:"⚡",  desc:"Timed reps with structured recovery" },
-                            ].map(wt => {
-                              const isActive = session.wtype === wt.key ||
-                                (wt.key === "intervals" && ["onoff","overunder","ladder","progression"].includes(session.wtype));
-                              return (
-                                <button key={wt.key}
-                                  onClick={() => onDaySlotChange(dayId, "workout", wt.key)}
-                                  title={wt.desc}
-                                  style={{padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",
-                                    borderRadius:"var(--r)",
-                                    border:`2px solid ${isActive ? SLOT_TYPES.workout.color : "var(--rule)"}`,
-                                    background: isActive ? SLOT_TYPES.workout.color : "white",
-                                    color: isActive ? "white" : "var(--ink3)",
-                                    transition:"all .15s"}}>
-                                  {wt.icon} {wt.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
                       )}
 
                       {/* Bronies run — allow swapping to another session type */}
@@ -2272,7 +2274,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
             completionMap={completionMap}
             onCompletion={onCompletion}
             onEdit={(dayId, changes) => onEdit && onEdit(week.weekNum, dayId, changes)}
-            onDaySlotChange={(dayId, slot) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot)}/>
+            onDaySlotChange={(dayId, slot, subtype) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot, subtype)}/>
         ))}
         {!week.isRaceWeek && (
           <WeeklyFeedback weekNum={week.weekNum} existing={feedbackMap[week.weekNum]} onSave={onFeedback}/>
@@ -2402,6 +2404,9 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
           const isCurrent = wStatus === "current";
           const isPast    = wStatus === "past";
 
+          // When filtering, hide weeks that don't have the selected session type
+          if (filter !== "all" && !matched) return null;
+
           return (
             <div key={i} onClick={() => onSelectWeek(i)}
               style={{borderBottom:"1px solid var(--rule)",cursor:"pointer",
@@ -2458,11 +2463,13 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
                 </div>
                 <span style={{color:"var(--ink4)",fontSize:11}}>›</span>
               </div>
-              {/* Per-day rows with completion buttons */}
+
+              {/* Session rows — show all when "All", show only matched session when filtered */}
               <div style={{padding:"0 var(--pad-x) 10px 52px",display:"flex",flexDirection:"column",gap:4}}>
-                {DAYS.filter(d => w.sessions?.[d.id] && w.sessions[d.id].wtype !== "rest")
-                  .slice(0, 4)
-                  .map((d, idx) => {
+                {(filter === "all"
+                  ? DAYS.filter(d => w.sessions?.[d.id] && w.sessions[d.id].wtype !== "rest").slice(0,4)
+                  : DAYS.filter(d => d.id === matched?.dayId)
+                ).map((d) => {
                     const dayIdx  = DAYS.indexOf(d);
                     const past    = dayIsPast(w.startDate, dayIdx);
                     const today   = dayIsToday(w.startDate, dayIdx);
@@ -2477,7 +2484,6 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
                     return (
                       <div key={d.id} style={{display:"flex",alignItems:"center",gap:6,
                         opacity: past && !cv ? 0.65 : 1}}>
-                        {/* Day label + session name */}
                         <span style={{
                           fontSize:11,color:today?"#2E7D32":slotColor,fontWeight:700,
                           flexShrink:0,minWidth:28,
@@ -2492,8 +2498,12 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
                           overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
                           textDecoration: past && cv === "nup_soft" ? "line-through" : "none"}}>
                           {w.sessions[d.id].label}
+                          {w.sessions[d.id].distance > 0 && (
+                            <span style={{marginLeft:6,fontSize:10,color:"var(--ink4)",fontFamily:"var(--mono)",fontWeight:700}}>
+                              {w.sessions[d.id].distance}km
+                            </span>
+                          )}
                         </span>
-                        {/* Yeah/Nup buttons — only past + today */}
                         {eligible && (
                           <div style={{display:"flex",gap:3,flexShrink:0}}
                             onClick={e => e.stopPropagation()}>
