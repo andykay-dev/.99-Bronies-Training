@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useForm } from "@formspree/react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -1162,7 +1162,7 @@ function buildSlot(slots, W, ctx) {
   const addStrength = hasStrength(slotArr) && primary !== "rest" && primary !== "strength";
 
   const { wn, dayId, slotIdx, isDown, isTaper, taperWkIdx, isPeakLong,
-          isTrail, paces, profile, event, longKm } = ctx;
+          isTrail, paces, profile, event, longKm, forcedSubtype } = ctx;
   const isBroniesDay = dayId === "wed" || dayId === "fri";
 
   let session;
@@ -1200,10 +1200,10 @@ function buildSlot(slots, W, ctx) {
       session = { ...W.easyRun(30), label:"Easy + 3 Fast Strides",
         summary:"30min easy + 3×1min fast — final tune-up" };
     } else {
-      // If a specific subtype was requested (hills/fartlek/intervals), force it
+      // Use forcedSubtype from ctx (slot override), or primary if it's a subtype key
       session = pickWorkout(W, wn, dayId, slotIdx, isTrail,
         profile?.hillAccess || "some hills", isDown,
-        WORKOUT_SUBTYPES.includes(primary) ? primary : null);
+        forcedSubtype || (WORKOUT_SUBTYPES.includes(primary) ? primary : null));
     }
   } else {
     session = W.rest();
@@ -4992,24 +4992,62 @@ export default function App() {
 
   // Merge plan weeks with any overrides before rendering.
   // Overrides win over generated sessions — they are the runner's manual adjustments.
-  const planWithOverrides = plan.map(week => {
+  const planWithOverrides = useMemo(() => plan.map(week => {
     const weekSessionOverrides = sessionOverrides[week.weekNum] || {};
     const weekSlotOverrides    = daySlotOverrides[week.weekNum] || {};
     if (!Object.keys(weekSessionOverrides).length && !Object.keys(weekSlotOverrides).length) {
       return week;
     }
     const sessions = { ...week.sessions };
+
+    // Apply slot overrides — rebuild the session for that day using buildSlot
+    if (Object.keys(weekSlotOverrides).length) {
+      const paces = derivePaces({
+        ...profile,
+        eventDistanceNum: parseFloat(event?.distance) || 42,
+        goalTime: event?.goalTime,
+      });
+      const W = makeW(paces);
+      const isTrail = event?.type === "trail";
+
+      Object.entries(weekSlotOverrides).forEach(([dayId, slotValue]) => {
+        // slotValue is either "hills"/"fartlek"/"tempo"/"intervals" (workout subtype)
+        // or a regular slot like "easy"/"long"/"rest" etc.
+        const isSubtype = WORKOUT_SUBTYPES.includes(slotValue);
+        const slots = isSubtype ? "workout" : slotValue;
+        const forcedSubtype = isSubtype ? slotValue : null;
+
+        const newSession = buildSlot(slots, W, {
+          wn: week.weekNum,
+          dayId,
+          slotIdx: 0,
+          isDown: week.isDown || false,
+          isTaper: week.phase === "TAPER",
+          taperWkIdx: 0,
+          isPeakLong: week.isPeakLong || false,
+          isTrail,
+          paces,
+          profile,
+          event,
+          longKm: Object.values(week.sessions).find(s => s?.wtype === "long")?.distance || 20,
+          forcedSubtype,
+        });
+        sessions[dayId] = newSession;
+      });
+    }
+
+    // Apply session field overrides (distance, notes etc.)
     Object.entries(weekSessionOverrides).forEach(([dayId, overrides]) => {
       if (sessions[dayId]) {
         sessions[dayId] = { ...sessions[dayId], ...overrides };
       }
     });
-    // Recalculate totalKm after distance overrides
+
     const totalKm = Math.round(
       DAYS.reduce((sum, d) => sum + (sessions[d.id]?.distance || 0), 0)
     );
     return { ...week, sessions, totalKm };
-  });
+  }), [plan, sessionOverrides, daySlotOverrides, profile, event]);
 
   function clearEvent() {
     setConfirmCfg({
