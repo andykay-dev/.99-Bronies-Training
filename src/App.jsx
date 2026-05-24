@@ -158,7 +158,7 @@ const G = ({ skin }) => {
 
       @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
       @keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-6px)}30%{transform:translateX(6px)}45%{transform:translateX(-5px)}60%{transform:translateX(5px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}
-      @keyframes disclaimer-in{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes disclaimer-in{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
       @keyframes stamp{0%{opacity:0;transform:scale(2.5) rotate(-12deg)}60%{opacity:1;transform:scale(0.9) rotate(-12deg)}75%{transform:scale(1.05) rotate(-12deg)}100%{transform:scale(1) rotate(-12deg)}}
       @keyframes skin-flash{0%{opacity:0}100%{opacity:1}}
 
@@ -2909,11 +2909,13 @@ function DisclaimerModal({ onAccept, onDecline }) {
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(10,20,50,.85)",zIndex:500,
-      display:"flex",alignItems:"flex-end",justifyContent:"center",
+      display:"flex",alignItems:"flex-start",justifyContent:"center",
+      paddingTop:"env(safe-area-inset-top, 16px)",
+      overflowY:"auto",
       backdropFilter:"blur(3px)"}}>
       <div className="disclaimer-card"
-        style={{background:"var(--white)",borderRadius:"14px 14px 0 0",width:"100%",
-          maxWidth:560,padding:"28px var(--pad-x) 40px",borderTop:"4px solid var(--accent)"}}>
+        style={{background:"var(--white)",borderRadius:"14px",width:"100%",margin:"16px var(--pad-x)",
+          maxWidth:560,padding:"24px var(--pad-x) 32px",borderTop:"4px solid var(--accent)"}}>
 
         {/* Header */}
         <div style={{display:"flex",alignItems:"flex-start",gap:14,marginBottom:20}}>
