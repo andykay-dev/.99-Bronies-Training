@@ -2734,13 +2734,14 @@ const store = {
     } catch { return { keys: [] }; }
   },
 
-  // After login: push any offline localStorage data up to Supabase
   async migrateLocalToSupabase() {
-    const uid = await getUid();
+    const { data: { session } } = await supabase.auth.getSession();
+    const uid = session?.user?.id;
     if (!uid) return;
     const keys = ["bep6_profile","bep6_event","bep6_fb","bep6_overrides","bep6_slots","bep6_completions","bep6_skin"];
     for (const key of keys) {
       try {
+        // localStorage stores with the APP_ID prefix
         const raw = localStorage.getItem(`${APP_ID}:${key}`);
         if (!raw) continue;
         let jsonVal; try { jsonVal = JSON.parse(raw); } catch { jsonVal = raw; }
@@ -4852,15 +4853,44 @@ export default function App() {
 
   // ── Load persisted state — only once auth is confirmed ──────
   useEffect(() => {
-    if (!authed) return; // don't load until authenticated or skipped
+    if (!authed) return;
     (async () => {
-      try { const r = await store.get("bep6_profile"); if (r) { setProfile(JSON.parse(r.value)); setScreen("plan"); } } catch {}
-      try { const r = await store.get("bep6_event");   if (r) setEvent(JSON.parse(r.value));   } catch {}
-      try { const r = await store.get("bep6_fb");      if (r) setFeedbackMap(JSON.parse(r.value)); } catch {}
-      try { const r = await store.get("bep6_overrides"); if (r) setSessionOverrides(JSON.parse(r.value)); } catch {}
-      try { const r = await store.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
-      try { const r = await store.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
-      try { const r = await store.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
+      // Get the live session to ensure we have a valid token before hitting Supabase
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id || null;
+
+      async function loadKey(key) {
+        // Try Supabase first if logged in
+        if (uid) {
+          try {
+            const { data, error } = await supabase
+              .from("app_data")
+              .select("value")
+              .eq("user_id", uid)
+              .eq("app_id", APP_ID)
+              .eq("key", key)
+              .single();
+            if (!error && data?.value != null) {
+              const v = data.value;
+              return typeof v === "string" ? v : JSON.stringify(v);
+            }
+          } catch {}
+        }
+        // Fall back to localStorage
+        try {
+          return localStorage.getItem(`${APP_ID}:${key}`) || null;
+        } catch { return null; }
+      }
+
+      try { const v = await loadKey("bep6_profile"); if (v) { setProfile(JSON.parse(v)); setScreen("plan"); } } catch {}
+      try { const v = await loadKey("bep6_event");   if (v) setEvent(JSON.parse(v));   } catch {}
+      try { const v = await loadKey("bep6_fb");      if (v) setFeedbackMap(JSON.parse(v)); } catch {}
+      try { const v = await loadKey("bep6_overrides"); if (v) setSessionOverrides(JSON.parse(v)); } catch {}
+      try { const v = await loadKey("bep6_slots");     if (v) setDaySlotOverrides(JSON.parse(v)); } catch {}
+      try { const v = await loadKey("bep6_completions"); if (v) setCompletionMap(JSON.parse(v)); } catch {}
+      try { const v = await loadKey("bep6_skin");      if (v) { setSkinState(v); document.body.setAttribute("data-skin", v); } } catch {}
+    })();
+  }, [authed]);
     })();
   }, [authed]); // re-runs when authed changes (login/logout)
 
