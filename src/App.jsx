@@ -4488,6 +4488,21 @@ function StatsScreen({ plan, completionMap, feedbackMap, profile, event }) {
 // ─────────────────────────────────────────────────────────────
 //  AUTH SCREEN — Login / Signup / Forgot password
 // ─────────────────────────────────────────────────────────────
+// Must be defined at module level — never inside another component —
+// so React sees a stable component identity and doesn't remount on every keystroke.
+function AuthField({ label, inputStyle, labelStyle, type, value, onChange, placeholder, autoComplete, minLength }) {
+  return (
+    <div style={{marginBottom:14}}>
+      <label style={labelStyle}>{label}</label>
+      <input
+        style={inputStyle} type={type} value={value} onChange={onChange}
+        placeholder={placeholder} autoComplete={autoComplete}
+        minLength={minLength} required
+      />
+    </div>
+  );
+}
+
 function AuthScreen({ onAuth }) {
   const [mode,     setMode]     = useState("login"); // "login" | "signup" | "forgot"
   const [email,    setEmail]    = useState("");
@@ -4526,17 +4541,6 @@ function AuthScreen({ onAuth }) {
       background: `linear-gradient(160deg, ${C.navyDk} 0%, ${C.navy} 60%, #2a1a5e 100%)`,
       padding:"24px 20px", boxSizing:"border-box", fontFamily:"system-ui,-apple-system,sans-serif",
     },
-    logo: { textAlign:"center", marginBottom:32 },
-    logoText: {
-      fontSize:"clamp(32px,10vw,52px)", fontWeight:900, letterSpacing:6,
-      color:C.white, fontStyle:"italic", lineHeight:1,
-      textShadow:`3px 3px 0 ${C.navyDk}, 0 0 30px rgba(201,168,76,0.3)`,
-    },
-    logoDot: {
-      fontSize:28, fontWeight:700, color:C.gold, marginTop:6,
-      fontFamily:"monospace", letterSpacing:2,
-    },
-    tagline: { fontSize:12, color:"rgba(255,255,255,0.55)", marginTop:6, letterSpacing:1.5 },
     card: {
       background:C.white, borderRadius:16, padding:"28px 24px",
       width:"100%", maxWidth:400, boxSizing:"border-box",
@@ -4620,24 +4624,35 @@ function AuthScreen({ onAuth }) {
     setSent(true); setLoading(false);
   }
 
-  const Field = ({ label, type, value, onChange, placeholder, autoComplete, minLength }) => (
-    <div style={{marginBottom:14}}>
-      <label style={styles.label}>{label}</label>
-      <input
-        style={styles.input} type={type} value={value} onChange={onChange}
-        placeholder={placeholder} autoComplete={autoComplete}
-        minLength={minLength} required
-      />
-    </div>
-  );
+  // Field is defined at module level below — must not be defined inside a component
 
   return (
     <div style={styles.page}>
-      {/* Logo */}
-      <div style={styles.logo}>
-        <div style={styles.logoText}>BRONIES</div>
-        <div style={styles.logoDot}>.99</div>
-        <div style={styles.tagline}>TRAINING PLATFORM</div>
+      {/* Logo — matches WelcomeScreen artwork exactly */}
+      <div style={{textAlign:"center",marginBottom:32}}>
+        {/* Bordered BRONIES box — same as WelcomeScreen */}
+        <div style={{background:"#1A3060",border:"3px solid #C9A84C",borderRadius:6,
+          padding:"6px 18px",display:"inline-block",marginBottom:12,
+          boxShadow:"3px 3px 0 #0d1e3d"}}>
+          <div style={{fontFamily:"Georgia,'Times New Roman',serif",fontSize:36,
+            letterSpacing:4,color:"#ffffff",fontStyle:"italic",lineHeight:1,
+            textShadow:"2px 2px 0 #0d1e3d"}}>
+            BRONIES
+          </div>
+        </div>
+        {/* .99 TRAINING — large gold italic */}
+        <div style={{fontFamily:"Georgia,'Times New Roman',serif",
+          fontSize:"clamp(32px,10vw,48px)",letterSpacing:2,lineHeight:1,
+          fontStyle:"italic",color:"#C9A84C",marginBottom:8,
+          textShadow:"3px 3px 0 #9a7020,5px 5px 0 #6b4e16"}}>
+          .99 TRAINING
+        </div>
+        <div style={{fontSize:11,color:"rgba(255,255,255,0.45)",letterSpacing:2,
+          textTransform:"uppercase"}}>
+          {mode === "login"  && "Welcome back, Bronie"}
+          {mode === "signup" && "Join the Bronies"}
+          {mode === "forgot" && "Reset your password"}
+        </div>
       </div>
 
       {/* Main card */}
@@ -4682,10 +4697,10 @@ function AuthScreen({ onAuth }) {
         {/* Login form */}
         {!sent && mode === "login" && (
           <form onSubmit={handleLogin}>
-            <Field label="Email" type="email" value={email}
+            <AuthField inputStyle={styles.input} labelStyle={styles.label} label="Email" type="email" value={email}
               onChange={e => setEmail(e.target.value)}
               placeholder="you@example.com" autoComplete="email"/>
-            <Field label="Password" type="password" value={password}
+            <AuthField inputStyle={styles.input} labelStyle={styles.label} label="Password" type="password" value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="••••••••" autoComplete="current-password"/>
             <button type="submit" style={{...styles.primaryBtn, opacity:loading?0.7:1}}
@@ -4704,13 +4719,13 @@ function AuthScreen({ onAuth }) {
         {/* Signup form */}
         {!sent && mode === "signup" && (
           <form onSubmit={handleSignup}>
-            <Field label="Your name" type="text" value={name}
+            <AuthField inputStyle={styles.input} labelStyle={styles.label} label="Your name" type="text" value={name}
               onChange={e => setName(e.target.value)}
               placeholder="First name or nickname" autoComplete="name"/>
-            <Field label="Email" type="email" value={email}
+            <AuthField inputStyle={styles.input} labelStyle={styles.label} label="Email" type="email" value={email}
               onChange={e => setEmail(e.target.value)}
               placeholder="you@example.com" autoComplete="email"/>
-            <Field label="Password" type="password" value={password}
+            <AuthField inputStyle={styles.input} labelStyle={styles.label} label="Password" type="password" value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="At least 6 characters" autoComplete="new-password" minLength={6}/>
             <button type="submit" style={{...styles.primaryBtn, opacity:loading?0.7:1}}
@@ -4723,7 +4738,7 @@ function AuthScreen({ onAuth }) {
         {/* Forgot password form */}
         {!sent && mode === "forgot" && (
           <form onSubmit={handleForgot}>
-            <Field label="Email" type="email" value={email}
+            <AuthField inputStyle={styles.input} labelStyle={styles.label} label="Email" type="email" value={email}
               onChange={e => setEmail(e.target.value)}
               placeholder="you@example.com" autoComplete="email"/>
             <button type="submit" style={{...styles.primaryBtn, opacity:loading?0.7:1}}
