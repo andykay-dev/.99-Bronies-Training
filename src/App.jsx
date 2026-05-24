@@ -157,7 +157,7 @@ const G = ({ skin }) => {
       html,body{background:var(--bg);font-family:var(--sans);color:var(--ink);
         -webkit-text-size-adjust:100%;text-size-adjust:100%;transition:background .3s,color .3s;
         font-size:14px;}
-      input,select,textarea,button{font-family:var(--sans);}
+      input:focus, select:focus, textarea:focus { outline:none; border-color:#1A3060 !important; box-shadow:0 0 0 3px rgba(26,48,96,0.15); }
 
       /* Tighten layout on very small screens (iPhone SE etc.) */
       @media (max-width: 374px) {
@@ -4627,8 +4627,6 @@ function AuthScreen({ onAuth }) {
         style={styles.input} type={type} value={value} onChange={onChange}
         placeholder={placeholder} autoComplete={autoComplete}
         minLength={minLength} required
-        onFocus={e => e.target.style.borderColor = C.navy}
-        onBlur={e => e.target.style.borderColor = C.border}
       />
     </div>
   );
