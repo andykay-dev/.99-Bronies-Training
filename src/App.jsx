@@ -1012,10 +1012,6 @@ function buildEventPlan(profile, event, dayPlan, fb) {
   return Array.from({ length: total }, (_, i) => {
     const wn         = i + 1;
     const phase      = getPhase(wn, total);
-    // A week is a "down week" if it's every 3rd week (build cycle recovery),
-    // OR if it falls between two peak long run weeks.
-    const isDown     = ((wn % 3 === 0) && !["TAPER","RACE","PEAK"].includes(phase))
-                    || interPeakDownWeeks.has(wn);
     const isTaper    = phase === "TAPER";
     const isRaceWk   = phase === "RACE";
     const pct        = wn / trainingWks;
