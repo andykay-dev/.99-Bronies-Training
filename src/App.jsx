@@ -4891,8 +4891,6 @@ export default function App() {
       try { const v = await loadKey("bep6_skin");      if (v) { setSkinState(v); document.body.setAttribute("data-skin", v); } } catch {}
     })();
   }, [authed]);
-    })();
-  }, [authed]); // re-runs when authed changes (login/logout)
 
   // ── Rebuild plan on profile/event/feedback change ──────────
   useEffect(() => {
