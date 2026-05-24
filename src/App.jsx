@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { useForm } from "@formspree/react";
+import { createClient } from "@supabase/supabase-js";
+
+// ─────────────────────────────────────────────────────────────
+//  SUPABASE CLIENT
+// ─────────────────────────────────────────────────────────────
+const SUPABASE_URL  = "https://shsukscaumecqdvrzqsk.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNoc3Vrc2NhdW1lY3FkdnJ6cXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1OTQ2NjQsImV4cCI6MjA5NTE3MDY2NH0.zGRdQgI1GzIaOpZHRH5Mqg77t6p9O0KUkkEkGVR6xY8";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ════════════════════════════════════════════════════════════
 //  .99 TRAINING
@@ -344,6 +352,7 @@ const DAYS = [
 // Normalise a dayPlan slot value to an array.
 // Old format: "workout" → ["workout"]
 // New format: ["workout","strength"] → ["workout","strength"]
+// Workout subtypes (hills, fartlek, intervals) are kept as-is for buildSlot to use
 function normaliseSlot(raw) {
   if (!raw) return ["rest"];
   if (Array.isArray(raw)) return raw.length ? raw : ["rest"];
@@ -359,6 +368,12 @@ function primarySlot(slots) {
 // Returns true if strength is included in a slot array
 function hasStrength(slots) {
   return normaliseSlot(slots).includes("strength");
+}
+
+// Workout subtype keys — treated as "workout" for planning purposes but force a specific session type
+const WORKOUT_SUBTYPES = ["hills", "fartlek", "intervals"];
+function isWorkoutSlot(p) {
+  return p === "workout" || WORKOUT_SUBTYPES.includes(p);
 }
 const SLOT_TYPES = {
   workout:   { label:"Workout",           icon:"⚡", color:"#7a4f00",
@@ -940,11 +955,20 @@ const TRAIL_WORKOUTS = (W, wn, slotIdx) => {
 //           ensures two workout days in the same week get different sessions
 // isTrail:  whether the event is trail (hills more appropriate)
 // hillAccess: from profile — whether the runner has hills available
-function pickWorkout(W, wn, dayId, slotIdx, isTrail, hillAccess, isDown) {
-  if (isDown) return W.fartlek(30);
-
+function pickWorkout(W, wn, dayId, slotIdx, isTrail, hillAccess, isDown, forcedSubtype) {
   const isSocialDay  = SOCIAL_DAYS.has(dayId);
   const hasHills     = hillAccess === "lots of hills" || hillAccess === "some hills";
+
+  // If a specific subtype is forced by user override, return that session type
+  if (forcedSubtype === "hills") {
+    return hasHills
+      ? W.hillReps(Math.min(8, 4 + Math.floor(wn / 4)))
+      : W.fartlek(35); // no hills available — substitute fartlek
+  }
+  if (forcedSubtype === "fartlek") return W.fartlek(Math.min(45, 30 + Math.floor(wn / 3) * 3));
+  if (forcedSubtype === "intervals") return W.intervals(Math.min(6, 3 + Math.floor(wn / 4)));
+
+  if (isDown) return W.fartlek(30);
 
   // Social days (Wed/Fri) = flat only, no hills
   if (isSocialDay) return FLAT_WORKOUTS(W, wn, slotIdx);
@@ -955,6 +979,7 @@ function pickWorkout(W, wn, dayId, slotIdx, isTrail, hillAccess, isDown) {
   // Road event / no hills = flat workouts only
   return FLAT_WORKOUTS(W, wn, slotIdx);
 }
+
 
 function buildEventPlan(profile, event, dayPlan, fb) {
   const trainingWks = Math.min(24, weeksUntil(event.date));
@@ -1152,7 +1177,7 @@ function buildSlot(slots, W, ctx) {
       detail:"Strength & conditioning day.\n\nChat to the Bronies about what you SHOULD be doing — they'll have opinions.\n\nFocus on single-leg stability, hip strength, and core work to keep you injury-free.",
       garmin:["No running today — strength session.", "Ask a Bronie what to do."],
     };
-  } else if (primary === "workout" && isBroniesDay) {
+  } else if (isWorkoutSlot(primary) && isBroniesDay) {
     session = W.bronieRun();
   } else if (primary === "easy") {
     if (isTaper && taperWkIdx >= 2) {
@@ -1166,7 +1191,7 @@ function buildSlot(slots, W, ctx) {
     } else {
       session = W.longEasy(longKm, isTrail, paces.ep);
     }
-  } else if (primary === "workout") {
+  } else if (isWorkoutSlot(primary)) {
     if (isTaper && taperWkIdx === 1) {
       session = { ...W.tempo(15), label:"Taper Maintenance Tempo",
         summary:"WU 10min · 15min tempo · CD 10min — stay sharp" };
@@ -1174,8 +1199,10 @@ function buildSlot(slots, W, ctx) {
       session = { ...W.easyRun(30), label:"Easy + 3 Fast Strides",
         summary:"30min easy + 3×1min fast — final tune-up" };
     } else {
+      // If a specific subtype was requested (hills/fartlek/intervals), force it
       session = pickWorkout(W, wn, dayId, slotIdx, isTrail,
-        profile?.hillAccess || "some hills", isDown);
+        profile?.hillAccess || "some hills", isDown,
+        WORKOUT_SUBTYPES.includes(primary) ? primary : null);
     }
   } else {
     session = W.rest();
@@ -1999,24 +2026,104 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                   <GarminBlock session={session} paces={paces}/>
 
                   {canEdit && (
-                    <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <button onClick={openEdit} className="btn btn-g btn-sm">✏ Edit session</button>
-                      {onDaySlotChange && !isBronies && (
-                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                          {Object.entries(SLOT_TYPES)
-                            .filter(([k]) => k !== "bronies")
-                            .map(([k, m]) => (
-                            <button key={k}
-                              onClick={() => onDaySlotChange(dayId, k)}
-                              title={`Change to ${m.label}`}
-                              style={{padding:"5px 8px",fontSize:11,fontWeight:600,
-                                borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                                background:"white",cursor:"pointer",color:"var(--ink3)"}}>
-                              {m.icon} {m.label}
-                            </button>
-                          ))}
+                    <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+
+                      {/* Workout sub-type picker — shown for workout sessions */}
+                      {(session.wtype === "intervals" || session.wtype === "tempo" ||
+                        session.wtype === "fartlek" || session.wtype === "hills" ||
+                        session.wtype === "onoff" || session.wtype === "overunder" ||
+                        session.wtype === "ladder" || session.wtype === "progression") && onDaySlotChange && (
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
+                            letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
+                            Swap workout type
+                          </div>
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            {[
+                              { key:"hills",     label:"Hills",     icon:"⛰",  desc:"Uphill reps — build power and strength" },
+                              { key:"fartlek",   label:"Fartlek",   icon:"🌀",  desc:"Unstructured speed play — run by feel" },
+                              { key:"intervals", label:"Intervals", icon:"⚡",  desc:"Timed reps with structured recovery" },
+                            ].map(wt => {
+                              const isActive = session.wtype === wt.key ||
+                                (wt.key === "intervals" && ["onoff","overunder","ladder","progression"].includes(session.wtype));
+                              return (
+                                <button key={wt.key}
+                                  onClick={() => onDaySlotChange(dayId, "workout", wt.key)}
+                                  title={wt.desc}
+                                  style={{padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",
+                                    borderRadius:"var(--r)",
+                                    border:`2px solid ${isActive ? SLOT_TYPES.workout.color : "var(--rule)"}`,
+                                    background: isActive ? SLOT_TYPES.workout.color : "white",
+                                    color: isActive ? "white" : "var(--ink3)",
+                                    transition:"all .15s"}}>
+                                  {wt.icon} {wt.label}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
+
+                      {/* Bronies run — allow swapping to another session type */}
+                      {isBronies && onDaySlotChange && (
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
+                            letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
+                            Change this session
+                          </div>
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            {["workout","easy","long","rest"].map(k => {
+                              const m = SLOT_TYPES[k];
+                              return (
+                                <button key={k}
+                                  onClick={() => onDaySlotChange(dayId, k)}
+                                  style={{padding:"6px 10px",fontSize:11,fontWeight:600,cursor:"pointer",
+                                    borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                                    background:"white",color:"var(--ink3)",transition:"all .15s"}}>
+                                  {m.icon} {m.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Non-Bronies, non-workout sessions — edit distance/notes + slot change */}
+                      {!isBronies && !(session.wtype === "intervals" || session.wtype === "tempo" ||
+                        session.wtype === "fartlek" || session.wtype === "hills" ||
+                        session.wtype === "onoff" || session.wtype === "overunder" ||
+                        session.wtype === "ladder" || session.wtype === "progression") && (
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                          <button onClick={openEdit} className="btn btn-g btn-sm">✏ Edit session</button>
+                          {onDaySlotChange && (
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                              {Object.entries(SLOT_TYPES)
+                                .filter(([k]) => k !== "bronies" && k !== "strength")
+                                .map(([k, m]) => (
+                                <button key={k}
+                                  onClick={() => onDaySlotChange(dayId, k)}
+                                  title={`Change to ${m.label}`}
+                                  style={{padding:"5px 8px",fontSize:11,fontWeight:600,
+                                    borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                                    background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                                  {m.icon} {m.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Workout sessions also get Edit button for distance/notes */}
+                      {(session.wtype === "intervals" || session.wtype === "tempo" ||
+                        session.wtype === "fartlek" || session.wtype === "hills" ||
+                        session.wtype === "onoff" || session.wtype === "overunder" ||
+                        session.wtype === "ladder" || session.wtype === "progression") && (
+                        <button onClick={openEdit} className="btn btn-g btn-sm" style={{alignSelf:"flex-start"}}>
+                          ✏ Edit distance / notes
+                        </button>
+                      )}
+
                     </div>
                   )}
                 </>
@@ -2116,8 +2223,19 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:200,
         display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
       <div style={{background:"#fff",borderRadius:"12px 12px 0 0",width:"100%",
-          maxWidth:560,maxHeight:"92vh",overflowY:"auto",padding:"16px var(--pad-x) 40px"}}
+          maxWidth:560,maxHeight:"92vh",overflowY:"auto",padding:"16px var(--pad-x) 40px",
+          position:"relative"}}
         onClick={e => e.stopPropagation()}>
+
+        {/* Sticky close button — always visible top-right */}
+        <button onClick={onClose}
+          style={{position:"sticky",top:0,float:"right",zIndex:10,
+            width:32,height:32,borderRadius:"50%",border:"2px solid var(--rule)",
+            background:"white",cursor:"pointer",fontSize:14,fontWeight:700,
+            color:"var(--ink3)",display:"flex",alignItems:"center",justifyContent:"center",
+            boxShadow:"0 2px 8px rgba(0,0,0,0.15)",marginBottom:-32,marginLeft:"auto"}}>
+          ✕
+        </button>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
           <div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:4}}>
@@ -2520,26 +2638,127 @@ function DayPlanPicker({ value, onChange }) {
 
 
 // ─────────────────────────────────────────────────────────────
-//  UI: Bug report + Feedback widget
-//  Uses @formspree/react — form ID: xykvjare
-//  https://formspree.io/f/xykvjare
+//  STORAGE ABSTRACTION
+//  Priority: Supabase (when logged in) → localStorage fallback
+//  All data stored with app_id = 'bronies-training' so future
+//  apps share the same Supabase project with different app_ids.
 // ─────────────────────────────────────────────────────────────
+const APP_ID = "bronies-training";
+
+async function getUid() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.user?.id || null;
+  } catch { return null; }
+}
+
+const store = {
+  async get(key) {
+    const uid = await getUid();
+    if (uid) {
+      try {
+        const { data, error } = await supabase
+          .from("app_data")
+          .select("value")
+          .eq("user_id", uid)
+          .eq("app_id", APP_ID)
+          .eq("key", key)
+          .single();
+        if (!error && data) {
+          const v = data.value;
+          return { value: typeof v === "string" ? v : JSON.stringify(v) };
+        }
+      } catch {}
+    }
+    try {
+      const val = localStorage.getItem(`${APP_ID}:${key}`);
+      return val ? { value: val } : null;
+    } catch { return null; }
+  },
+
+  async set(key, value) {
+    const uid = await getUid();
+    if (uid) {
+      try {
+        let jsonVal; try { jsonVal = JSON.parse(value); } catch { jsonVal = value; }
+        await supabase.from("app_data").upsert({
+          user_id: uid, app_id: APP_ID, key,
+          value: jsonVal, updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id,app_id,key" });
+      } catch {}
+    }
+    try { localStorage.setItem(`${APP_ID}:${key}`, value); } catch {}
+    return { value };
+  },
+
+  async delete(key) {
+    const uid = await getUid();
+    if (uid) {
+      try {
+        await supabase.from("app_data")
+          .delete()
+          .eq("user_id", uid).eq("app_id", APP_ID).eq("key", key);
+      } catch {}
+    }
+    try { localStorage.removeItem(`${APP_ID}:${key}`); } catch {}
+    return { deleted: true };
+  },
+
+  async list(prefix) {
+    const uid = await getUid();
+    if (uid) {
+      try {
+        const { data } = await supabase.from("app_data")
+          .select("key")
+          .eq("user_id", uid).eq("app_id", APP_ID)
+          .like("key", `${prefix}%`);
+        if (data) return { keys: data.map(r => r.key) };
+      } catch {}
+    }
+    try {
+      const pre = `${APP_ID}:${prefix}`;
+      const keys = Object.keys(localStorage)
+        .filter(k => k.startsWith(pre))
+        .map(k => k.replace(`${APP_ID}:`, ""));
+      return { keys };
+    } catch { return { keys: [] }; }
+  },
+
+  // After login: push any offline localStorage data up to Supabase
+  async migrateLocalToSupabase() {
+    const uid = await getUid();
+    if (!uid) return;
+    const keys = ["bep6_profile","bep6_event","bep6_fb","bep6_overrides","bep6_slots","bep6_completions","bep6_skin"];
+    for (const key of keys) {
+      try {
+        const raw = localStorage.getItem(`${APP_ID}:${key}`);
+        if (!raw) continue;
+        let jsonVal; try { jsonVal = JSON.parse(raw); } catch { jsonVal = raw; }
+        await supabase.from("app_data").upsert({
+          user_id: uid, app_id: APP_ID, key,
+          value: jsonVal, updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id,app_id,key" });
+      } catch {}
+    }
+  },
+};
+
 const FORMSPREE_FORM_ID = "xykvjare";
 
 // Store feedback locally so it can be reviewed in-app
 async function saveFeedbackLocally(entry) {
   try {
     const key = `feedback:${Date.now()}`;
-    await window.storage.set(key, JSON.stringify(entry));
+    await store.set(key, JSON.stringify(entry));
   } catch {}
 }
 
 async function loadAllFeedback() {
   try {
-    const keys = await window.storage.list("feedback:");
+    const keys = await store.list("feedback:");
     const entries = await Promise.all(
       (keys?.keys || []).map(async k => {
-        try { const r = await window.storage.get(k); return r ? JSON.parse(r.value) : null; }
+        try { const r = await store.get(k); return r ? JSON.parse(r.value) : null; }
         catch { return null; }
       })
     );
@@ -2716,73 +2935,56 @@ function FeedbackForm({ currentScreen, onSent }) {
   );
 }
 
-function FeedbackWidget({ currentScreen }) {
-  const [open, setOpen]       = useState(false);
+function FeedbackWidget({ currentScreen, open, onClose }) {
   const [mode, setMode]       = useState(null); // "bug" | "feedback" | "dashboard"
   const [sent, setSent]       = useState(false);
   const [dashboard, setDashboard] = useState([]);
 
   function reset() { setMode(null); setSent(false); }
-  function close() { setOpen(false); setTimeout(reset, 300); }
+  function close() { onClose(); setTimeout(reset, 300); }
 
   async function openDashboard() {
     const items = await loadAllFeedback();
     setDashboard(items);
     setMode("dashboard");
-    setOpen(true);
   }
 
   const ratingEmoji = {
     "😍 Love it":"😍","🙂 Pretty good":"🙂","😐 Meh":"😐","😤 Frustrating":"😤","🤬 Broken":"🤬",
   };
 
+  if (!open) return null;
+
   return (
     <>
-      {/* Floating trigger button */}
-      <div style={{position:"fixed",bottom:20,right:16,zIndex:200}}>
-        <button onClick={() => { setOpen(true); setMode(null); setSent(false); }}
-          style={{background:"var(--accent)",color:"#fff",border:"2px solid #660018",
-            boxShadow:"3px 3px 0 #660018",padding:"9px 14px",fontFamily:"var(--sans)",
-            fontSize:11,fontWeight:700,cursor:"pointer",borderRadius:"var(--r)",
-            letterSpacing:.5,whiteSpace:"nowrap"}}>
-          😤 This bit looks a bit crap
-        </button>
-      </div>
-
       {/* Bottom-sheet overlay */}
-      {open && (
-        <div style={{position:"fixed",inset:0,background:"rgba(10,20,50,.8)",zIndex:400,
-          display:"flex",alignItems:"flex-end",justifyContent:"center",
-          backdropFilter:"blur(2px)"}}
-          onClick={e => e.target===e.currentTarget && close()}>
-          <div style={{background:"var(--white)",borderRadius:"12px 12px 0 0",width:"100%",
-            maxWidth:560,maxHeight:"90vh",overflowY:"auto",
-            borderTop:"4px solid var(--accent)",boxShadow:"0 -4px 40px rgba(0,0,0,.3)"}}>
+      <div style={{position:"fixed",inset:0,background:"rgba(10,20,50,.8)",zIndex:400,
+        display:"flex",alignItems:"flex-end",justifyContent:"center",
+        backdropFilter:"blur(2px)"}}
+        onClick={e => e.target===e.currentTarget && close()}>
+        <div style={{background:"var(--white)",borderRadius:"12px 12px 0 0",width:"100%",
+          maxWidth:560,maxHeight:"90vh",overflowY:"auto",
+          borderTop:"4px solid var(--accent)",boxShadow:"0 -4px 40px rgba(0,0,0,.3)"}}>
 
-            {/* Header — always visible */}
-            {!sent && (
-              <div style={{padding:"16px var(--pad-x) 0",display:"flex",alignItems:"center",gap:10}}>
-                {mode && (
-                  <button onClick={reset}
-                    style={{background:"none",border:"none",fontSize:18,cursor:"pointer",
-                      color:"var(--ink3)",padding:"2px 6px"}}>←</button>
-                )}
-                <div style={{fontFamily:"var(--display)",fontSize:20,letterSpacing:1.5,color:"var(--accent)"}}>
-                  {!mode && "FEEDBACK HQ"}
-                  {mode==="bug" && "🐛 BUG REPORT"}
-                  {mode==="feedback" && "💬 FEEDBACK"}
-                  {mode==="dashboard" && "📋 DASHBOARD"}
-                </div>
-                {!mode && (
-                  <div style={{marginLeft:"auto",fontSize:10,color:"var(--ink4)",fontStyle:"italic"}}>
-                    on: <strong>{currentScreen}</strong>
-                  </div>
-                )}
-                <button onClick={close}
-                  style={{marginLeft:"auto",background:"none",border:"none",
-                    fontSize:18,cursor:"pointer",color:"var(--ink4)",padding:"2px 6px"}}>✕</button>
+          {/* Header — always visible */}
+          {!sent && (
+            <div style={{padding:"16px var(--pad-x) 0",display:"flex",alignItems:"center",gap:10}}>
+              {mode && (
+                <button onClick={reset}
+                  style={{background:"none",border:"none",fontSize:18,cursor:"pointer",
+                    color:"var(--ink3)",padding:"2px 6px"}}>←</button>
+              )}
+              <div style={{fontFamily:"var(--display)",fontSize:"clamp(13px,4vw,18px)",letterSpacing:1,color:"var(--accent)",flex:1}}>
+                {!mode && "Something looks a bit crap, you should fix it"}
+                {mode==="bug" && "🐛 BUG REPORT"}
+                {mode==="feedback" && "💬 FEEDBACK"}
+                {mode==="dashboard" && "📋 DASHBOARD"}
               </div>
-            )}
+              <button onClick={close}
+                style={{background:"none",border:"none",
+                  fontSize:18,cursor:"pointer",color:"var(--ink4)",padding:"2px 6px",flexShrink:0}}>✕</button>
+            </div>
+          )}
 
             {/* Mode picker */}
             {!mode && (
@@ -2887,7 +3089,6 @@ function FeedbackWidget({ currentScreen }) {
 
           </div>
         </div>
-      )}
     </>
   );
 }
@@ -3706,15 +3907,33 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Header
 // ─────────────────────────────────────────────────────────────
-function Header({ screen, onNav, hasData, skin, setSkin }) {
+function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, onLogout }) {
   const is8bit = skin === "8bit";
   return (
     <div style={{position:"sticky",top:0,zIndex:100}}>
       <div style={{background:"var(--hud)",padding:"4px var(--pad-x)",
-        display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <span style={{fontFamily:"var(--mono)",fontSize:9,color:"#fff",letterSpacing:1}}>SCORE 000000</span>
-        <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--gold)",letterSpacing:1,fontWeight:700}}>BRONIES</span>
-        <span style={{fontFamily:"var(--mono)",fontSize:9,color:"#fff",letterSpacing:1}}>LIVES ♥♥♥</span>
+        display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+        <button onClick={onFeedback}
+          style={{background:"none",border:"1px solid rgba(255,255,255,0.25)",
+            borderRadius:4,padding:"2px 8px",cursor:"pointer",
+            fontFamily:"var(--mono)",fontSize:9,color:"#fff",letterSpacing:1,
+            fontWeight:700,textTransform:"uppercase",flexShrink:0}}>
+          Feedback
+        </button>
+        <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--gold)",
+          letterSpacing:1,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",
+          whiteSpace:"nowrap",flex:1,textAlign:"center"}}>
+          {userEmail ? `👤 ${userEmail}` : "BRONIES"}
+        </span>
+        {onLogout && (
+          <button onClick={onLogout}
+            style={{background:"none",border:"1px solid rgba(255,255,255,0.2)",
+              borderRadius:4,padding:"2px 8px",cursor:"pointer",
+              fontFamily:"var(--mono)",fontSize:9,color:"rgba(255,255,255,.6)",
+              letterSpacing:1,flexShrink:0}}>
+            Log out
+          </button>
+        )}
       </div>
       <div style={{background:"var(--nav)",padding:"10px var(--pad-x)",borderBottom:"3px solid var(--gold)",
         display:"flex",alignItems:"center",gap:12}}>
@@ -4267,9 +4486,226 @@ function StatsScreen({ plan, completionMap, feedbackMap, profile, event }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  AUTH SCREEN — Login / Signup / Forgot password
+// ─────────────────────────────────────────────────────────────
+function AuthScreen({ onAuth }) {
+  const [mode,     setMode]     = useState("login"); // "login" | "signup" | "forgot"
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
+  const [name,     setName]     = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState(null);
+  const [sent,     setSent]     = useState(false);
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) { setError(error.message); setLoading(false); return; }
+    await store.migrateLocalToSupabase();
+    onAuth();
+  }
+
+  async function handleSignup(e) {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    const { error } = await supabase.auth.signUp({
+      email, password,
+      options: { data: { name } },
+    });
+    if (error) { setError(error.message); setLoading(false); return; }
+    setSent(true);
+    setLoading(false);
+  }
+
+  async function handleForgot(e) {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    if (error) { setError(error.message); setLoading(false); return; }
+    setSent(true);
+    setLoading(false);
+  }
+
+  const inp = {
+    className:"inp",
+    style:{width:"100%",boxSizing:"border-box",fontSize:15,padding:"12px 14px"},
+  };
+
+  if (sent && mode === "signup") return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
+      background:"var(--nav)",padding:"24px var(--pad-x)"}}>
+      <div style={{maxWidth:400,width:"100%",textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:16}}>📬</div>
+        <div style={{fontFamily:"var(--display)",fontSize:20,color:"white",marginBottom:12,letterSpacing:1}}>
+          Check your email
+        </div>
+        <div style={{fontSize:14,color:"rgba(255,255,255,.7)",lineHeight:1.7,marginBottom:24}}>
+          We sent a confirmation link to <strong style={{color:"var(--gold)"}}>{email}</strong>.
+          Click it to verify your account then come back and log in.
+        </div>
+        <button onClick={() => { setSent(false); setMode("login"); }} className="btn btn-o" style={{width:"100%"}}>
+          Back to Login
+        </button>
+      </div>
+    </div>
+  );
+
+  if (sent && mode === "forgot") return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
+      background:"var(--nav)",padding:"24px var(--pad-x)"}}>
+      <div style={{maxWidth:400,width:"100%",textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:16}}>🔑</div>
+        <div style={{fontFamily:"var(--display)",fontSize:20,color:"white",marginBottom:12,letterSpacing:1}}>
+          Reset email sent
+        </div>
+        <div style={{fontSize:14,color:"rgba(255,255,255,.7)",lineHeight:1.7,marginBottom:24}}>
+          Check <strong style={{color:"var(--gold)"}}>{email}</strong> for a password reset link.
+        </div>
+        <button onClick={() => { setSent(false); setMode("login"); }} className="btn btn-o" style={{width:"100%"}}>
+          Back to Login
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",
+      background:"var(--nav)",padding:"24px var(--pad-x)"}}>
+
+      {/* Logo */}
+      <div style={{textAlign:"center",marginBottom:32}}>
+        <div style={{fontFamily:"var(--display)",fontSize:"clamp(28px,10vw,42px)",
+          letterSpacing:4,color:"white",fontStyle:"italic",lineHeight:1,
+          textShadow:"2px 2px 0 #1A3060"}}>BRONIES</div>
+        <div style={{fontFamily:"var(--mono)",fontSize:24,fontWeight:700,
+          color:"var(--gold)",marginTop:4}}>.99</div>
+        <div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:4,letterSpacing:1}}>
+          {mode === "login"  && "Welcome back, Bronie"}
+          {mode === "signup" && "Join the Bronies"}
+          {mode === "forgot" && "Reset your password"}
+        </div>
+      </div>
+
+      {/* Card */}
+      <div style={{background:"var(--white)",borderRadius:12,padding:"24px 20px",
+        width:"100%",maxWidth:400,boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
+
+        {error && (
+          <div style={{marginBottom:14,padding:"10px 12px",background:"#fce8e8",
+            border:"1px solid #ef5350",borderRadius:"var(--r)",
+            fontSize:12,color:"#c0392b",lineHeight:1.5}}>
+            {error}
+          </div>
+        )}
+
+        {mode === "login" && (
+          <form onSubmit={handleLogin} style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div>
+              <label className="lbl">Email</label>
+              <input {...inp} type="email" value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com" required autoComplete="email"/>
+            </div>
+            <div>
+              <label className="lbl">Password</label>
+              <input {...inp} type="password" value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••" required autoComplete="current-password"/>
+            </div>
+            <button type="submit" className="btn btn-p"
+              disabled={loading} style={{width:"100%",marginTop:4,padding:"13px"}}>
+              {loading ? "Logging in…" : "Log In"}
+            </button>
+            <button type="button" onClick={() => { setMode("forgot"); setError(null); }}
+              style={{background:"none",border:"none",fontSize:12,color:"var(--ink3)",
+                cursor:"pointer",textAlign:"center",padding:4}}>
+              Forgot password?
+            </button>
+          </form>
+        )}
+
+        {mode === "signup" && (
+          <form onSubmit={handleSignup} style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div>
+              <label className="lbl">Name</label>
+              <input {...inp} type="text" value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Your name" required autoComplete="name"/>
+            </div>
+            <div>
+              <label className="lbl">Email</label>
+              <input {...inp} type="email" value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com" required autoComplete="email"/>
+            </div>
+            <div>
+              <label className="lbl">Password</label>
+              <input {...inp} type="password" value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="At least 6 characters" required minLength={6}
+                autoComplete="new-password"/>
+            </div>
+            <button type="submit" className="btn btn-p"
+              disabled={loading} style={{width:"100%",marginTop:4,padding:"13px"}}>
+              {loading ? "Creating account…" : "Create Account"}
+            </button>
+          </form>
+        )}
+
+        {mode === "forgot" && (
+          <form onSubmit={handleForgot} style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div>
+              <label className="lbl">Email</label>
+              <input {...inp} type="email" value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com" required autoComplete="email"/>
+            </div>
+            <button type="submit" className="btn btn-p"
+              disabled={loading} style={{width:"100%",marginTop:4,padding:"13px"}}>
+              {loading ? "Sending…" : "Send Reset Link"}
+            </button>
+            <button type="button" onClick={() => { setMode("login"); setError(null); }}
+              style={{background:"none",border:"none",fontSize:12,color:"var(--ink3)",
+                cursor:"pointer",textAlign:"center",padding:4}}>
+              Back to login
+            </button>
+          </form>
+        )}
+      </div>
+
+      {/* Toggle login / signup */}
+      {mode !== "forgot" && (
+        <div style={{marginTop:20,fontSize:13,color:"rgba(255,255,255,.6)"}}>
+          {mode === "login" ? "Don't have an account? " : "Already have an account? "}
+          <button onClick={() => { setMode(mode==="login"?"signup":"login"); setError(null); setSent(false); }}
+            style={{background:"none",border:"none",color:"var(--gold)",fontWeight:700,
+              cursor:"pointer",fontSize:13,padding:0}}>
+            {mode === "login" ? "Sign up" : "Log in"}
+          </button>
+        </div>
+      )}
+
+      {/* Skip login — use without account */}
+      <button onClick={onAuth}
+        style={{marginTop:12,background:"none",border:"none",
+          fontSize:11,color:"rgba(255,255,255,.35)",cursor:"pointer",padding:4}}>
+        Continue without an account →
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 //  ROOT APP
 // ─────────────────────────────────────────────────────────────
 export default function App() {
+  const [authReady,      setAuthReady]      = useState(false);  // true once we've checked session
+  const [authed,         setAuthed]         = useState(false);  // true if logged in or skipped
+  const [userEmail,      setUserEmail]      = useState(null);
   const [screen,         setScreen]         = useState("welcome");
   const [profile,        setProfile]        = useState(null);
   const [event,          setEvent]          = useState(null);
@@ -4281,18 +4717,62 @@ export default function App() {
   const [confirmCfg,     setConfirmCfg]     = useState(null);
   const [sessionOverrides, setSessionOverrides] = useState({});
   const [daySlotOverrides, setDaySlotOverrides] = useState({});
-  const [completionMap,    setCompletionMap]    = useState({}); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
+  const [completionMap,    setCompletionMap]    = useState({});
+  const [feedbackOpen,     setFeedbackOpen]     = useState(false); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
   const [skin,           setSkinState]      = useState("default"); // "default" | "8bit"
 
   // Apply skin to <body data-skin="..."> and persist choice
   async function setSkin(s) {
     setSkinState(s);
     document.body.setAttribute("data-skin", s);
-    try { await window.storage.set("bep6_skin", s); } catch {}
+    try { await store.set("bep6_skin", s); } catch {}
   }
 
-  // Ensure iPhone (and other small screens) get a proper viewport
-  // so the layout fits the screen instead of getting clipped/zoomed.
+  // ── Auth: check existing session on mount ──────────────────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setAuthed(true);
+        setUserEmail(session.user.email);
+      }
+      setAuthReady(true);
+    });
+    // Listen for login/logout events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setAuthed(true);
+        setUserEmail(session.user.email);
+      } else {
+        setAuthed(false);
+        setUserEmail(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setAuthed(false);
+    setUserEmail(null);
+    setProfile(null); setEvent(null); setPlan([]); setFeedbackMap({});
+    setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
+    setScreen("welcome");
+  }
+
+  // Show nothing until we know if there's a session (avoids flash)
+  if (!authReady) return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",
+      justifyContent:"center",background:"var(--nav)"}}>
+      <div style={{fontFamily:"var(--mono)",fontSize:14,color:"var(--gold)",letterSpacing:2}}>
+        LOADING…
+      </div>
+    </div>
+  );
+
+  // Show auth screen if not logged in / not skipped
+  if (!authed) return <AuthScreen onAuth={() => setAuthed(true)} />;
+
+  // ── Ensure iPhone gets a proper viewport ───────────────────
   useEffect(() => {
     let tag = document.querySelector('meta[name="viewport"]');
     if (!tag) {
@@ -4306,13 +4786,13 @@ export default function App() {
   // Load persisted state (with one-time migration from earlier storage keys)
   useEffect(() => {
     (async () => {
-      try { const r = await window.storage.get("bep6_profile"); if (r) { setProfile(JSON.parse(r.value)); setScreen("plan"); } } catch {}
-      try { const r = await window.storage.get("bep6_event");   if (r) setEvent(JSON.parse(r.value));   } catch {}
-      try { const r = await window.storage.get("bep6_fb");      if (r) setFeedbackMap(JSON.parse(r.value)); } catch {}
-      try { const r = await window.storage.get("bep6_overrides"); if (r) setSessionOverrides(JSON.parse(r.value)); } catch {}
-      try { const r = await window.storage.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
-      try { const r = await window.storage.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
-      try { const r = await window.storage.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
+      try { const r = await store.get("bep6_profile"); if (r) { setProfile(JSON.parse(r.value)); setScreen("plan"); } } catch {}
+      try { const r = await store.get("bep6_event");   if (r) setEvent(JSON.parse(r.value));   } catch {}
+      try { const r = await store.get("bep6_fb");      if (r) setFeedbackMap(JSON.parse(r.value)); } catch {}
+      try { const r = await store.get("bep6_overrides"); if (r) setSessionOverrides(JSON.parse(r.value)); } catch {}
+      try { const r = await store.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
+      try { const r = await store.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
+      try { const r = await store.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
     })();
   }, []);
 
@@ -4326,13 +4806,13 @@ export default function App() {
 
   async function handleOnboardingComplete(p, e) {
     setProfile(p); setEvent(e); setFeedbackMap({});
-    try { await window.storage.set("bep6_profile", JSON.stringify(p)); } catch {}
+    try { await store.set("bep6_profile", JSON.stringify(p)); } catch {}
     if (e) {
-      try { await window.storage.set("bep6_event", JSON.stringify(e)); } catch {}
+      try { await store.set("bep6_event", JSON.stringify(e)); } catch {}
     } else {
-      try { await window.storage.delete("bep6_event"); } catch {}
+      try { await store.delete("bep6_event"); } catch {}
     }
-    try { await window.storage.set("bep6_fb", JSON.stringify({})); } catch {}
+    try { await store.set("bep6_fb", JSON.stringify({})); } catch {}
     setScreen("plan");
     showToast(e ? "Plan built — let's go!" : "Profile saved");
   }
@@ -4341,13 +4821,13 @@ export default function App() {
     const s = DEMO_SCENARIOS[key];
     if (!s) return;
     setProfile(s.profile); setEvent(s.event); setFeedbackMap({});
-    try { await window.storage.set("bep6_profile", JSON.stringify(s.profile)); } catch {}
+    try { await store.set("bep6_profile", JSON.stringify(s.profile)); } catch {}
     if (s.event) {
-      try { await window.storage.set("bep6_event", JSON.stringify(s.event)); } catch {}
+      try { await store.set("bep6_event", JSON.stringify(s.event)); } catch {}
     } else {
-      try { await window.storage.delete("bep6_event"); } catch {}
+      try { await store.delete("bep6_event"); } catch {}
     }
-    try { await window.storage.set("bep6_fb", JSON.stringify({})); } catch {}
+    try { await store.set("bep6_fb", JSON.stringify({})); } catch {}
     setShowDemo(false);
     setScreen("plan");
     showToast(`Loaded: ${s.label}`);
@@ -4356,7 +4836,7 @@ export default function App() {
   function handleFeedback(weekNum, choice) {
     const next = { ...feedbackMap, [weekNum]: choice };
     setFeedbackMap(next);
-    try { window.storage.set("bep6_fb", JSON.stringify(next)); } catch {}
+    try { store.set("bep6_fb", JSON.stringify(next)); } catch {}
     showToast("Feedback saved — plan adjusting");
   }
 
@@ -4374,7 +4854,7 @@ export default function App() {
       },
     };
     setSessionOverrides(next);
-    try { window.storage.set("bep6_overrides", JSON.stringify(next)); } catch {}
+    try { store.set("bep6_overrides", JSON.stringify(next)); } catch {}
     showToast("Session updated");
   }
 
@@ -4383,20 +4863,23 @@ export default function App() {
   function handleCompletion(key, value) {
     const next = { ...completionMap, [key]: value };
     setCompletionMap(next);
-    try { window.storage.set("bep6_completions", JSON.stringify(next)); } catch {}
+    try { store.set("bep6_completions", JSON.stringify(next)); } catch {}
   }
 
   // Swap the slot type (workout/easy/long/rest) for a specific day in a week.
-  function handleDaySlotChange(weekNum, dayId, newSlot) {
+  function handleDaySlotChange(weekNum, dayId, newSlot, workoutSubtype) {
+    // If a workout subtype is specified (hills/fartlek/intervals), store that directly
+    // so buildSlot can produce the correct session type.
+    const slotToStore = workoutSubtype || newSlot;
     const next = {
       ...daySlotOverrides,
       [weekNum]: {
         ...(daySlotOverrides[weekNum] || {}),
-        [dayId]: newSlot,
+        [dayId]: slotToStore,
       },
     };
     setDaySlotOverrides(next);
-    try { window.storage.set("bep6_slots", JSON.stringify(next)); } catch {}
+    try { store.set("bep6_slots", JSON.stringify(next)); } catch {}
     showToast("Day updated — plan refreshed");
   }
 
@@ -4430,11 +4913,11 @@ export default function App() {
       onConfirm: async () => {
         setEvent(null); setPlan([]); setFeedbackMap({});
         setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
-        try { await window.storage.delete("bep6_event"); } catch {}
-        try { await window.storage.delete("bep6_fb"); } catch {}
-        try { await window.storage.delete("bep6_overrides"); } catch {}
-        try { await window.storage.delete("bep6_slots"); } catch {}
-        try { await window.storage.delete("bep6_completions"); } catch {}
+        try { await store.delete("bep6_event"); } catch {}
+        try { await store.delete("bep6_fb"); } catch {}
+        try { await store.delete("bep6_overrides"); } catch {}
+        try { await store.delete("bep6_slots"); } catch {}
+        try { await store.delete("bep6_completions"); } catch {}
         setConfirmCfg(null);
         showToast("Event cleared");
       },
@@ -4451,12 +4934,12 @@ export default function App() {
         setProfile(null); setEvent(null); setPlan([]); setFeedbackMap({});
         setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
         try {
-          await window.storage.delete("bep6_profile");
-          await window.storage.delete("bep6_event");
-          await window.storage.delete("bep6_fb");
-          await window.storage.delete("bep6_overrides");
-          await window.storage.delete("bep6_slots");
-          await window.storage.delete("bep6_completions");
+          await store.delete("bep6_profile");
+          await store.delete("bep6_event");
+          await store.delete("bep6_fb");
+          await store.delete("bep6_overrides");
+          await store.delete("bep6_slots");
+          await store.delete("bep6_completions");
         } catch {}
         setConfirmCfg(null);
         setScreen("welcome");
@@ -4474,7 +4957,7 @@ export default function App() {
       <G skin={skin}/>
       <div style={{minHeight:"100vh",background:"var(--bg)",maxWidth:720,margin:"0 auto"}}>
         <Header screen={screen} onNav={s => { setSelWeek(null); setScreen(s); }}
-          hasData={hasData} skin={skin} setSkin={setSkin}/>
+          hasData={hasData} skin={skin} setSkin={setSkin} onFeedback={() => setFeedbackOpen(true)} userEmail={userEmail} onLogout={handleLogout}/>
 
         {screen === "welcome" && (
           <WelcomeScreen onStart={() => setScreen("onboarding")} onDemo={() => setShowDemo(true)}/>
@@ -4786,7 +5269,7 @@ export default function App() {
       </div>
 
       {/* Feedback + Bug report floating widget */}
-      <FeedbackWidget currentScreen={screen} />
+      <FeedbackWidget currentScreen={screen} open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
 
       {toast && (
         <div style={{position:"fixed",bottom:32,left:"50%",transform:"translateX(-50%)",
