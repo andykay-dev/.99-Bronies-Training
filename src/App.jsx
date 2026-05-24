@@ -4497,6 +4497,100 @@ function AuthScreen({ onAuth }) {
   const [error,    setError]    = useState(null);
   const [sent,     setSent]     = useState(false);
 
+  // Hardcoded colours — AuthScreen renders before CSS vars are available
+  const C = {
+    navy:    "#1A3060",
+    navyDk:  "#0d1e3d",
+    gold:    "#C9A84C",
+    goldBrt: "#F0C040",
+    red:     "#c0392b",
+    redDk:   "#96220f",
+    white:   "#ffffff",
+    offWhite:"#f8f8f6",
+    ink:     "#1a1a1a",
+    ink3:    "#666",
+    ink4:    "#999",
+    border:  "#ddd",
+    errBg:   "#fce8e8",
+    errBdr:  "#ef5350",
+    errTxt:  "#c0392b",
+    okBg:    "#e8f5e9",
+    okBdr:   "#4CAF50",
+    okTxt:   "#1a472a",
+  };
+
+  const styles = {
+    page: {
+      minHeight:"100vh", display:"flex", flexDirection:"column",
+      alignItems:"center", justifyContent:"center",
+      background: `linear-gradient(160deg, ${C.navyDk} 0%, ${C.navy} 60%, #2a1a5e 100%)`,
+      padding:"24px 20px", boxSizing:"border-box", fontFamily:"system-ui,-apple-system,sans-serif",
+    },
+    logo: { textAlign:"center", marginBottom:32 },
+    logoText: {
+      fontSize:"clamp(32px,10vw,52px)", fontWeight:900, letterSpacing:6,
+      color:C.white, fontStyle:"italic", lineHeight:1,
+      textShadow:`3px 3px 0 ${C.navyDk}, 0 0 30px rgba(201,168,76,0.3)`,
+    },
+    logoDot: {
+      fontSize:28, fontWeight:700, color:C.gold, marginTop:6,
+      fontFamily:"monospace", letterSpacing:2,
+    },
+    tagline: { fontSize:12, color:"rgba(255,255,255,0.55)", marginTop:6, letterSpacing:1.5 },
+    card: {
+      background:C.white, borderRadius:16, padding:"28px 24px",
+      width:"100%", maxWidth:400, boxSizing:"border-box",
+      boxShadow:"0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)",
+    },
+    cardTitle: {
+      fontSize:20, fontWeight:800, color:C.ink, marginBottom:6, letterSpacing:-.3,
+    },
+    cardSub: { fontSize:13, color:C.ink4, marginBottom:20 },
+    label: { display:"block", fontSize:11, fontWeight:700, color:C.ink3,
+      letterSpacing:.8, textTransform:"uppercase", marginBottom:5 },
+    input: {
+      width:"100%", boxSizing:"border-box", padding:"12px 14px", fontSize:15,
+      border:`2px solid ${C.border}`, borderRadius:10, outline:"none",
+      fontFamily:"inherit", color:C.ink, background:C.offWhite,
+      transition:"border-color .15s",
+    },
+    primaryBtn: {
+      width:"100%", padding:"14px", fontSize:15, fontWeight:700,
+      background:C.red, color:C.white, border:"none", borderRadius:10,
+      cursor:"pointer", marginTop:8, letterSpacing:.3,
+      boxShadow:`0 4px 12px rgba(192,57,43,0.4)`,
+      transition:"opacity .15s",
+    },
+    linkBtn: {
+      background:"none", border:"none", fontSize:13, color:C.navy,
+      cursor:"pointer", textAlign:"center", padding:"6px 0",
+      textDecoration:"underline", fontFamily:"inherit", fontWeight:600,
+    },
+    error: {
+      marginBottom:14, padding:"10px 12px", background:C.errBg,
+      border:`1px solid ${C.errBdr}`, borderRadius:8,
+      fontSize:13, color:C.errTxt, lineHeight:1.5,
+    },
+    success: {
+      marginBottom:14, padding:"12px 14px", background:C.okBg,
+      border:`1px solid ${C.okBdr}`, borderRadius:8,
+      fontSize:13, color:C.okTxt, lineHeight:1.6,
+    },
+    divider: {
+      display:"flex", alignItems:"center", gap:10, margin:"16px 0",
+    },
+    dividerLine: { flex:1, height:1, background:C.border },
+    dividerText: { fontSize:11, color:C.ink4, fontWeight:600, letterSpacing:.5 },
+    switchRow: { marginTop:20, textAlign:"center", fontSize:13, color:"rgba(255,255,255,0.65)" },
+    skipBtn: {
+      marginTop:14, background:"rgba(255,255,255,0.1)",
+      border:"1px solid rgba(255,255,255,0.25)", borderRadius:10,
+      color:"rgba(255,255,255,0.8)", fontSize:13, fontWeight:600,
+      cursor:"pointer", padding:"11px 24px", width:"100%", maxWidth:400,
+      fontFamily:"inherit", letterSpacing:.3, transition:"background .15s",
+    },
+  };
+
   async function handleLogin(e) {
     e.preventDefault();
     setLoading(true); setError(null);
@@ -4510,12 +4604,10 @@ function AuthScreen({ onAuth }) {
     e.preventDefault();
     setLoading(true); setError(null);
     const { error } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { name } },
+      email, password, options: { data: { name } },
     });
     if (error) { setError(error.message); setLoading(false); return; }
-    setSent(true);
-    setLoading(false);
+    setSent(true); setLoading(false);
   }
 
   async function handleForgot(e) {
@@ -4525,176 +4617,151 @@ function AuthScreen({ onAuth }) {
       redirectTo: window.location.origin,
     });
     if (error) { setError(error.message); setLoading(false); return; }
-    setSent(true);
-    setLoading(false);
+    setSent(true); setLoading(false);
   }
 
-  const inp = {
-    className:"inp",
-    style:{width:"100%",boxSizing:"border-box",fontSize:15,padding:"12px 14px"},
-  };
-
-  if (sent && mode === "signup") return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
-      background:"var(--nav)",padding:"24px var(--pad-x)"}}>
-      <div style={{maxWidth:400,width:"100%",textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:16}}>📬</div>
-        <div style={{fontFamily:"var(--display)",fontSize:20,color:"white",marginBottom:12,letterSpacing:1}}>
-          Check your email
-        </div>
-        <div style={{fontSize:14,color:"rgba(255,255,255,.7)",lineHeight:1.7,marginBottom:24}}>
-          We sent a confirmation link to <strong style={{color:"var(--gold)"}}>{email}</strong>.
-          Click it to verify your account then come back and log in.
-        </div>
-        <button onClick={() => { setSent(false); setMode("login"); }} className="btn btn-o" style={{width:"100%"}}>
-          Back to Login
-        </button>
-      </div>
-    </div>
-  );
-
-  if (sent && mode === "forgot") return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
-      background:"var(--nav)",padding:"24px var(--pad-x)"}}>
-      <div style={{maxWidth:400,width:"100%",textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:16}}>🔑</div>
-        <div style={{fontFamily:"var(--display)",fontSize:20,color:"white",marginBottom:12,letterSpacing:1}}>
-          Reset email sent
-        </div>
-        <div style={{fontSize:14,color:"rgba(255,255,255,.7)",lineHeight:1.7,marginBottom:24}}>
-          Check <strong style={{color:"var(--gold)"}}>{email}</strong> for a password reset link.
-        </div>
-        <button onClick={() => { setSent(false); setMode("login"); }} className="btn btn-o" style={{width:"100%"}}>
-          Back to Login
-        </button>
-      </div>
+  const Field = ({ label, type, value, onChange, placeholder, autoComplete, minLength }) => (
+    <div style={{marginBottom:14}}>
+      <label style={styles.label}>{label}</label>
+      <input
+        style={styles.input} type={type} value={value} onChange={onChange}
+        placeholder={placeholder} autoComplete={autoComplete}
+        minLength={minLength} required
+        onFocus={e => e.target.style.borderColor = C.navy}
+        onBlur={e => e.target.style.borderColor = C.border}
+      />
     </div>
   );
 
   return (
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",
-      alignItems:"center",justifyContent:"center",
-      background:"var(--nav)",padding:"24px var(--pad-x)"}}>
-
+    <div style={styles.page}>
       {/* Logo */}
-      <div style={{textAlign:"center",marginBottom:32}}>
-        <div style={{fontFamily:"var(--display)",fontSize:"clamp(28px,10vw,42px)",
-          letterSpacing:4,color:"white",fontStyle:"italic",lineHeight:1,
-          textShadow:"2px 2px 0 #1A3060"}}>BRONIES</div>
-        <div style={{fontFamily:"var(--mono)",fontSize:24,fontWeight:700,
-          color:"var(--gold)",marginTop:4}}>.99</div>
-        <div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:4,letterSpacing:1}}>
-          {mode === "login"  && "Welcome back, Bronie"}
-          {mode === "signup" && "Join the Bronies"}
-          {mode === "forgot" && "Reset your password"}
-        </div>
+      <div style={styles.logo}>
+        <div style={styles.logoText}>BRONIES</div>
+        <div style={styles.logoDot}>.99</div>
+        <div style={styles.tagline}>TRAINING PLATFORM</div>
       </div>
 
-      {/* Card */}
-      <div style={{background:"var(--white)",borderRadius:12,padding:"24px 20px",
-        width:"100%",maxWidth:400,boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
+      {/* Main card */}
+      <div style={styles.card}>
 
-        {error && (
-          <div style={{marginBottom:14,padding:"10px 12px",background:"#fce8e8",
-            border:"1px solid #ef5350",borderRadius:"var(--r)",
-            fontSize:12,color:"#c0392b",lineHeight:1.5}}>
-            {error}
+        {/* Card heading */}
+        <div style={styles.cardTitle}>
+          {mode === "login"  && "Welcome back"}
+          {mode === "signup" && "Create an account"}
+          {mode === "forgot" && "Reset password"}
+        </div>
+        <div style={styles.cardSub}>
+          {mode === "login"  && "Log in to access your training plan"}
+          {mode === "signup" && "Your plan syncs across all your devices"}
+          {mode === "forgot" && "We'll email you a reset link"}
+        </div>
+
+        {error && <div style={styles.error}>{error}</div>}
+
+        {/* Sent confirmation */}
+        {sent && mode === "signup" && (
+          <div style={styles.success}>
+            📬 Check <strong>{email}</strong> — click the link to confirm your account, then log in.
+            <div style={{marginTop:8}}>
+              <button style={styles.linkBtn} onClick={() => { setSent(false); setMode("login"); }}>
+                Back to login →
+              </button>
+            </div>
+          </div>
+        )}
+        {sent && mode === "forgot" && (
+          <div style={styles.success}>
+            🔑 Reset link sent to <strong>{email}</strong>.
+            <div style={{marginTop:8}}>
+              <button style={styles.linkBtn} onClick={() => { setSent(false); setMode("login"); }}>
+                Back to login →
+              </button>
+            </div>
           </div>
         )}
 
-        {mode === "login" && (
-          <form onSubmit={handleLogin} style={{display:"flex",flexDirection:"column",gap:12}}>
-            <div>
-              <label className="lbl">Email</label>
-              <input {...inp} type="email" value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com" required autoComplete="email"/>
-            </div>
-            <div>
-              <label className="lbl">Password</label>
-              <input {...inp} type="password" value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••" required autoComplete="current-password"/>
-            </div>
-            <button type="submit" className="btn btn-p"
-              disabled={loading} style={{width:"100%",marginTop:4,padding:"13px"}}>
+        {/* Login form */}
+        {!sent && mode === "login" && (
+          <form onSubmit={handleLogin}>
+            <Field label="Email" type="email" value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com" autoComplete="email"/>
+            <Field label="Password" type="password" value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••" autoComplete="current-password"/>
+            <button type="submit" style={{...styles.primaryBtn, opacity:loading?0.7:1}}
+              disabled={loading}>
               {loading ? "Logging in…" : "Log In"}
             </button>
-            <button type="button" onClick={() => { setMode("forgot"); setError(null); }}
-              style={{background:"none",border:"none",fontSize:12,color:"var(--ink3)",
-                cursor:"pointer",textAlign:"center",padding:4}}>
-              Forgot password?
-            </button>
+            <div style={{textAlign:"center",marginTop:10}}>
+              <button type="button" style={styles.linkBtn}
+                onClick={() => { setMode("forgot"); setError(null); }}>
+                Forgot password?
+              </button>
+            </div>
           </form>
         )}
 
-        {mode === "signup" && (
-          <form onSubmit={handleSignup} style={{display:"flex",flexDirection:"column",gap:12}}>
-            <div>
-              <label className="lbl">Name</label>
-              <input {...inp} type="text" value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="Your name" required autoComplete="name"/>
-            </div>
-            <div>
-              <label className="lbl">Email</label>
-              <input {...inp} type="email" value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com" required autoComplete="email"/>
-            </div>
-            <div>
-              <label className="lbl">Password</label>
-              <input {...inp} type="password" value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="At least 6 characters" required minLength={6}
-                autoComplete="new-password"/>
-            </div>
-            <button type="submit" className="btn btn-p"
-              disabled={loading} style={{width:"100%",marginTop:4,padding:"13px"}}>
+        {/* Signup form */}
+        {!sent && mode === "signup" && (
+          <form onSubmit={handleSignup}>
+            <Field label="Your name" type="text" value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="First name or nickname" autoComplete="name"/>
+            <Field label="Email" type="email" value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com" autoComplete="email"/>
+            <Field label="Password" type="password" value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="At least 6 characters" autoComplete="new-password" minLength={6}/>
+            <button type="submit" style={{...styles.primaryBtn, opacity:loading?0.7:1}}
+              disabled={loading}>
               {loading ? "Creating account…" : "Create Account"}
             </button>
           </form>
         )}
 
-        {mode === "forgot" && (
-          <form onSubmit={handleForgot} style={{display:"flex",flexDirection:"column",gap:12}}>
-            <div>
-              <label className="lbl">Email</label>
-              <input {...inp} type="email" value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com" required autoComplete="email"/>
-            </div>
-            <button type="submit" className="btn btn-p"
-              disabled={loading} style={{width:"100%",marginTop:4,padding:"13px"}}>
+        {/* Forgot password form */}
+        {!sent && mode === "forgot" && (
+          <form onSubmit={handleForgot}>
+            <Field label="Email" type="email" value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com" autoComplete="email"/>
+            <button type="submit" style={{...styles.primaryBtn, opacity:loading?0.7:1}}
+              disabled={loading}>
               {loading ? "Sending…" : "Send Reset Link"}
             </button>
-            <button type="button" onClick={() => { setMode("login"); setError(null); }}
-              style={{background:"none",border:"none",fontSize:12,color:"var(--ink3)",
-                cursor:"pointer",textAlign:"center",padding:4}}>
-              Back to login
-            </button>
+            <div style={{textAlign:"center",marginTop:10}}>
+              <button type="button" style={styles.linkBtn}
+                onClick={() => { setMode("login"); setError(null); }}>
+                ← Back to login
+              </button>
+            </div>
           </form>
         )}
       </div>
 
       {/* Toggle login / signup */}
       {mode !== "forgot" && (
-        <div style={{marginTop:20,fontSize:13,color:"rgba(255,255,255,.6)"}}>
+        <div style={styles.switchRow}>
           {mode === "login" ? "Don't have an account? " : "Already have an account? "}
-          <button onClick={() => { setMode(mode==="login"?"signup":"login"); setError(null); setSent(false); }}
-            style={{background:"none",border:"none",color:"var(--gold)",fontWeight:700,
-              cursor:"pointer",fontSize:13,padding:0}}>
-            {mode === "login" ? "Sign up" : "Log in"}
+          <button
+            onClick={() => { setMode(mode==="login"?"signup":"login"); setError(null); setSent(false); }}
+            style={{background:"none",border:"none",color:C.goldBrt,fontWeight:700,
+              cursor:"pointer",fontSize:13,padding:0,textDecoration:"underline",fontFamily:"inherit"}}>
+            {mode === "login" ? "Sign up free" : "Log in"}
           </button>
         </div>
       )}
 
-      {/* Skip login — use without account */}
-      <button onClick={onAuth}
-        style={{marginTop:12,background:"none",border:"none",
-          fontSize:11,color:"rgba(255,255,255,.35)",cursor:"pointer",padding:4}}>
-        Continue without an account →
+      {/* Skip / bypass — clearly visible */}
+      <button onClick={onAuth} style={styles.skipBtn}>
+        Continue without an account
       </button>
+      <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:8,textAlign:"center"}}>
+        Data saves to this device only — no cross-device sync
+      </div>
     </div>
   );
 }
