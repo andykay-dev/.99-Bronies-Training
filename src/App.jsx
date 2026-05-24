@@ -4817,7 +4817,6 @@ export default function App() {
       }
       setAuthReady(true);
     });
-    // Listen for login/logout events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setAuthed(true);
@@ -4830,29 +4829,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    setAuthed(false);
-    setUserEmail(null);
-    setProfile(null); setEvent(null); setPlan([]); setFeedbackMap({});
-    setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
-    setScreen("welcome");
-  }
-
-  // Show nothing until we know if there's a session (avoids flash)
-  if (!authReady) return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",
-      justifyContent:"center",background:"var(--nav)"}}>
-      <div style={{fontFamily:"var(--mono)",fontSize:14,color:"var(--gold)",letterSpacing:2}}>
-        LOADING…
-      </div>
-    </div>
-  );
-
-  // Show auth screen if not logged in / not skipped
-  if (!authed) return <AuthScreen onAuth={() => setAuthed(true)} />;
-
-  // ── Ensure iPhone gets a proper viewport ───────────────────
+  // ── Viewport fix for iPhone ─────────────────────────────────
   useEffect(() => {
     let tag = document.querySelector('meta[name="viewport"]');
     if (!tag) {
@@ -4863,8 +4840,9 @@ export default function App() {
     tag.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover");
   }, []);
 
-  // Load persisted state (with one-time migration from earlier storage keys)
+  // ── Load persisted state — only once auth is confirmed ──────
   useEffect(() => {
+    if (!authed) return; // don't load until authenticated or skipped
     (async () => {
       try { const r = await store.get("bep6_profile"); if (r) { setProfile(JSON.parse(r.value)); setScreen("plan"); } } catch {}
       try { const r = await store.get("bep6_event");   if (r) setEvent(JSON.parse(r.value));   } catch {}
@@ -4874,13 +4852,22 @@ export default function App() {
       try { const r = await store.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
       try { const r = await store.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
     })();
-  }, []);
+  }, [authed]); // re-runs when authed changes (login/logout)
 
-  // Rebuild the plan whenever profile, event, or feedback changes
+  // ── Rebuild plan on profile/event/feedback change ──────────
   useEffect(() => {
     if (profile) setPlan(buildPlan(profile, event, feedbackMap));
     else setPlan([]);
   }, [event, profile, feedbackMap]);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setAuthed(false);
+    setUserEmail(null);
+    setProfile(null); setEvent(null); setPlan([]); setFeedbackMap({});
+    setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
+    setScreen("welcome");
+  }
 
   function showToast(m) { setToast(m); setTimeout(() => setToast(""), 2500); }
 
@@ -5031,6 +5018,17 @@ export default function App() {
   const isHangout = profile?.trainingGoal === "hangout";
   const daysTo  = event?.date ? Math.floor((new Date(event.date) - TODAY)/(1000*60*60*24)) : null;
   const selectedWeek = selWeek !== null ? planWithOverrides[selWeek] : null;
+
+  // Early returns — must be after all hooks and function definitions
+  if (!authReady) return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",
+      justifyContent:"center",background:"#1A3060"}}>
+      <div style={{fontFamily:"monospace",fontSize:14,color:"#C9A84C",letterSpacing:2}}>
+        LOADING…
+      </div>
+    </div>
+  );
+  if (!authed) return <AuthScreen onAuth={() => setAuthed(true)} />;
 
   return (
     <>
