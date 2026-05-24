@@ -68,21 +68,36 @@ const G = ({ skin }) => {
         --hud:#0a0a1a; --nav:#1a3a6e; --navtab:#0a2050;
         --gold:#ffd700; --gold-dark:#b8960c; --gold-pale:#2a2000;
         --card-shadow:4px 4px 0 #1a3a6e;
-        --sans:'Press Start 2P',monospace; --mono:'VT323',monospace;
-        --display:'Press Start 2P',monospace; --handwrite:'VT323',monospace;
+        /* Use Press Start 2P only for display/headings via --display.
+           Body/UI uses a system mono so it stays readable and doesn't overflow. */
+        --sans:ui-monospace,'Courier New',monospace;
+        --mono:'VT323',monospace;
+        --display:'Press Start 2P',monospace;
+        --handwrite:'VT323',monospace;
         --r:0px; --pad-x:10px; --pad-x-tight:8px;
         background-image:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px);
         image-rendering:pixelated;
+        font-size:11px;
+        overflow-x:hidden;
       }
+
+      /* Only headings/display elements get Press Start 2P */
+      body[data-skin="8bit"] [style*="var(--display)"],
+      body[data-skin="8bit"] .display-font {
+        font-family:'Press Start 2P',monospace;
+        word-break:break-word;
+        overflow-wrap:break-word;
+      }
+
       @media (min-width: 480px){
-        body[data-skin="8bit"]{ --pad-x:12px; --pad-x-tight:10px; }
+        body[data-skin="8bit"]{ --pad-x:12px; --pad-x-tight:10px; font-size:12px; }
       }
 
       /* ── 8-bit extra styles ── */
       body[data-skin="8bit"] input,
       body[data-skin="8bit"] select,
-      body[data-skin="8bit"] textarea,
-      body[data-skin="8bit"] button{ font-family:'Press Start 2P',monospace; }
+      body[data-skin="8bit"] textarea { font-family:ui-monospace,'Courier New',monospace; font-size:11px; }
+      body[data-skin="8bit"] button { font-size:9px; }
 
       /* CRT scanline overlay — 8bit only */
       body[data-skin="8bit"]::after{
@@ -112,6 +127,23 @@ const G = ({ skin }) => {
 
       /* 8-bit select options */
       body[data-skin="8bit"] select option{background:#0a0a1a;color:#ffd700;}
+
+      /* Nav tabs — keep compact */
+      body[data-skin="8bit"] .nav-tab{font-size:7px;letter-spacing:.5px;text-transform:uppercase;padding:8px 6px;}
+
+      /* Prevent any element overflowing screen width in 8bit mode */
+      body[data-skin="8bit"] * {
+        max-width:100%;
+        box-sizing:border-box;
+      }
+      body[data-skin="8bit"] div,
+      body[data-skin="8bit"] span,
+      body[data-skin="8bit"] p {
+        word-break:break-word;
+        overflow-wrap:break-word;
+      }
+      /* clamp all inline fontSizes set via style props in 8bit mode */
+      body[data-skin="8bit"] { font-size:11px; }
 
       /* ── Base styles (shared) ── */
       html,body{background:var(--bg);font-family:var(--sans);color:var(--ink);
@@ -158,8 +190,8 @@ const G = ({ skin }) => {
 
       /* 8-bit button overrides */
       body[data-skin="8bit"] .btn{font-size:8px;border-radius:0;font-weight:400;
-        letter-spacing:.5px;text-transform:uppercase;line-height:1.4;padding:10px 14px;
-        transition:transform .05s,box-shadow .05s;}
+        letter-spacing:.3px;text-transform:uppercase;line-height:1.4;padding:8px 12px;
+        transition:transform .05s,box-shadow .05s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
       body[data-skin="8bit"] .btn:hover:not(:disabled){filter:none;}
       body[data-skin="8bit"] .btn:active:not(:disabled){transform:translate(2px,2px);box-shadow:none!important;}
       body[data-skin="8bit"] .btn:disabled{opacity:.3;}
@@ -169,9 +201,9 @@ const G = ({ skin }) => {
       body[data-skin="8bit"] .btn-o:hover:not(:disabled){background:#1a1200;filter:none;}
       body[data-skin="8bit"] .btn-g{background:#0a0a1a;color:#445566;border:2px solid #1a3a6e;box-shadow:2px 2px 0 #0a2050;}
       body[data-skin="8bit"] .btn-g:hover:not(:disabled){background:#0a1a3a;color:#a0c8f0;filter:none;}
-      body[data-skin="8bit"] .btn-sm{font-size:6px;padding:6px 10px;}
+      body[data-skin="8bit"] .btn-sm{font-size:6px;padding:5px 8px;}
       body[data-skin="8bit"] .btn-pill{border-radius:0;font-size:6px;font-weight:400;
-        background:#0a0a1a;color:#445566;border:2px solid #1a3a6e;letter-spacing:.5px;text-transform:uppercase;}
+        background:#0a0a1a;color:#445566;border:2px solid #1a3a6e;letter-spacing:.3px;text-transform:uppercase;}
       body[data-skin="8bit"] .btn-pill.on{background:#1a1200;color:#ffd700;border-color:#b8960c;box-shadow:2px 2px 0 #b8960c;}
 
       /* INPUTS */
