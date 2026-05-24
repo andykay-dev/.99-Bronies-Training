@@ -956,7 +956,6 @@ const TRAIL_WORKOUTS = (W, wn, slotIdx) => {
 // isTrail:  whether the event is trail (hills more appropriate)
 // hillAccess: from profile — whether the runner has hills available
 function pickWorkout(W, wn, dayId, slotIdx, isTrail, hillAccess, isDown, forcedSubtype) {
-  const isSocialDay  = SOCIAL_DAYS.has(dayId);
   const hasHills     = hillAccess === "lots of hills" || hillAccess === "some hills";
 
   // If a specific subtype is forced by user override, return that session type
@@ -971,13 +970,10 @@ function pickWorkout(W, wn, dayId, slotIdx, isTrail, hillAccess, isDown, forcedS
 
   if (isDown) return W.fartlek(30);
 
-  // Social days (Wed/Fri) = flat only, no hills
-  if (isSocialDay) return FLAT_WORKOUTS(W, wn, slotIdx);
+  // Use hills if trail event or runner has hill access
+  if (isTrail || hasHills) return TRAIL_WORKOUTS(W, wn, slotIdx);
 
-  // Non-social days: use hills if the event is trail OR runner has hill access
-  if ((isTrail || hasHills) && !isSocialDay) return TRAIL_WORKOUTS(W, wn, slotIdx);
-
-  // Road event / no hills = flat workouts only
+  // Road event / no hills = flat workouts
   return FLAT_WORKOUTS(W, wn, slotIdx);
 }
 
@@ -1162,8 +1158,7 @@ function buildSlot(slots, W, ctx) {
   const addStrength = hasStrength(slotArr) && primary !== "rest" && primary !== "strength";
 
   const { wn, dayId, slotIdx, isDown, isTaper, taperWkIdx, isPeakLong,
-          isTrail, paces, profile, event, longKm, forcedSubtype } = ctx;
-  const isBroniesDay = dayId === "wed" || dayId === "fri";
+          isTrail, paces, profile, event, longKm, forcedSubtype, isOverride } = ctx;
 
   let session;
 
@@ -1178,8 +1173,6 @@ function buildSlot(slots, W, ctx) {
       detail:"Strength & conditioning day.\n\nChat to the Bronies about what you SHOULD be doing — they'll have opinions.\n\nFocus on single-leg stability, hip strength, and core work to keep you injury-free.",
       garmin:["No running today — strength session.", "Ask a Bronie what to do."],
     };
-  } else if (isWorkoutSlot(primary) && isBroniesDay) {
-    session = W.bronieRun();
   } else if (primary === "easy") {
     if (isTaper && taperWkIdx >= 2) {
       session = { ...W.easyRun(30), label:"Easy + Strides", summary:"30min easy + 4 strides — wake the legs" };
@@ -5029,6 +5022,7 @@ export default function App() {
           event,
           longKm: Object.values(week.sessions).find(s => s?.wtype === "long")?.distance || 20,
           forcedSubtype,
+          isOverride: true,  // respect user's explicit session choice
         });
         sessions[dayId] = newSession;
       });
