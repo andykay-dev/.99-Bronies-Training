@@ -961,7 +961,7 @@ function pickWorkout(W, wn, dayId, slotIdx, isTrail, hillAccess, isDown, forcedS
   // If a specific subtype is forced by user override, return that session type
   if (forcedSubtype === "hills") {
     return hasHills
-      ? W.hillReps(Math.min(8, 4 + Math.floor(wn / 4)))
+      ? W.hillRepeats(Math.min(8, 4 + Math.floor(wn / 4)))
       : W.fartlek(35);
   }
   if (forcedSubtype === "fartlek")   return W.fartlek(Math.min(45, 30 + Math.floor(wn / 3) * 3));
