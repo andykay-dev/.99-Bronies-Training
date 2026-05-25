@@ -657,26 +657,14 @@ function makeW(paces){
       detail:`7.99km easy social run from the Little Black Pony Coffee Shop.\n\nConversational pace @ ${fmtPace(ep)}/km or slower.\nFinish on the .99. Always.\n\nCoffee after. Non-negotiable.`,
       garmin:[`Distance: 7.99km | Auto Lap every 1km`,`Pace: ≤${fmtPace(Math.round(ep*0.94))}/km — conversational only`,`NOTE: Free-run mode recommended.`],
     }),
-    easyRun:(min,withStrides=false)=>{
+    easyRun:(min)=>{
       const m=min||40;
       const dist=to99(m*60/Math.round(ep*1.04));
-      const stridePace=Math.round(ip*0.95);
-      const strideNote=withStrides
-        ? `\n\nAfter your run: 4×20sec strides @ ${fmtPace(stridePace)}/km effort.\n• Accelerate smoothly over the first 5sec, hold for 10sec, decelerate for 5sec.\n• 60sec easy walk between each.\n• These should feel fast but controlled — not a sprint. Legs light, not heavy.\n• Done in 6–8min. Don't skip them.`
-        : "";
-      const strideGarmin=withStrides
-        ? [`EASY RUN — Duration: ${m}:00 | Pace: ${fmtPace(ep)} – ${fmtPace(Math.round(ep*1.15))}/km | Zone 1–2`,
-           `STRIDES ×4:`,
-           `  STRIDE — Time: 0:20 | Effort: fast & controlled (~${fmtPace(stridePace)}/km)`,
-           `  WALK   — Time: 1:00 | Easy recovery walk`]
-        : [`Duration: ${m}:00 | Pace: ${fmtPace(ep)} – ${fmtPace(Math.round(ep*1.15))}/km | Zone 1–2`];
       return {
-        wtype:"easy",
-        label:withStrides?`${m}min Easy + Strides`:`${m}min Easy Run`,
-        distance:dist,estMins:withStrides?m+8:m,
-        summary:withStrides?`${m}min easy · 4×20sec strides · ${dist}km`:`${m}min easy · ${dist}km`,
-        detail:`${m}min easy aerobic run @ ${fmtPace(Math.round(ep*1.04))}/km.\n\nFully conversational — you should be able to hold a full conversation.\nIf you're breathing hard, slow down.\n\nEasy runs are where most of your aerobic fitness is built. Don't skip them.`+strideNote,
-        garmin:strideGarmin,
+        wtype:"easy",label:`${m}min Easy Run`,distance:dist,estMins:m,
+        summary:`${m}min easy · ${dist}km`,
+        detail:`${m}min easy aerobic run @ ${fmtPace(Math.round(ep*1.04))}/km.\n\nFully conversational — you should be able to hold a full conversation.\nIf you're breathing hard, slow down.\n\nEasy runs are where most of your aerobic fitness is built. Don't skip them.`,
+        garmin:[`Duration: ${m}:00 | Pace: ${fmtPace(ep)} – ${fmtPace(Math.round(ep*1.15))}/km | Zone 1–2`],
       };
     },
     longEasy:(km,isTrail,epOverride)=>{
@@ -922,36 +910,6 @@ function buildEventPlan(profile,event,dayPlan,fb){
     const longSession=Object.values(sessions).find(s=>s?.wtype==="long");
     return {weekNum:wn,phase,startDate,isDown,isPeakLong,isPostPeakDown,weekLabel,sessions,totalKm,note,longRunMins:longSession?.estMins||0};
   });
-
-  // 10% rule check — flag any week where volume jumps >10% vs prior non-down week.
-  // Applied post-build so it sees the real numbers. Skipped for down/taper/race weeks (volume drop is intentional).
-  const result = [];
-  for (let i = 0; i < weeks.length; i++) {
-    const week = weeks[i];
-    let volumeWarning = null;
-    if (!week.isDown && week.phase !== "TAPER" && week.phase !== "RACE" && i > 0) {
-      // Find last non-down, non-taper week to compare against
-      let prevKm = null;
-      for (let j = i - 1; j >= 0; j--) {
-        if (!weeks[j].isDown && weeks[j].phase !== "TAPER" && weeks[j].phase !== "RACE") {
-          prevKm = weeks[j].totalKm;
-          break;
-        }
-      }
-      if (prevKm && prevKm > 0) {
-        const pctIncrease = (week.totalKm - prevKm) / prevKm;
-        if (pctIncrease > 0.10) {
-          volumeWarning = {
-            pct: Math.round(pctIncrease * 100),
-            prevKm,
-            thisKm: week.totalKm,
-          };
-        }
-      }
-    }
-    result.push({ ...week, volumeWarning });
-  }
-  return result;
 }
 
 function buildSlot(slots,W,ctx){
@@ -969,14 +927,7 @@ function buildSlot(slots,W,ctx){
     if(isTaper&&taperWkIdx>=2){
       session={...W.easyRun(30),label:"Easy + Strides",summary:"30min easy + 4 strides — wake the legs"};
     } else {
-      // Add strides to Tuesday and Thursday easy runs in BUILD and PEAK phases.
-      // Strides fire fast-twitch fibres without adding fatigue — Daniels, Pfitzinger standard.
-      // Not on down weeks, not in BASE (too early), not in TAPER (legs need rest).
-      const STRIDE_DAYS = ["tue","thu"];
-      const withStrides = !isDown
-        && (phase === "BUILD" || phase === "PEAK")
-        && STRIDE_DAYS.includes(dayId);
-      session=W.easyRun(isDown?35:40, withStrides);
+      session=W.easyRun(isDown?35:40);
     }
   } else if(primary==="long"){
     if(isPeakLong&&!isTrail&&event?.goalTime){
@@ -1352,12 +1303,11 @@ function GarminBlock({ session, paces }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Session card
 // ─────────────────────────────────────────────────────────────
-function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, weekSessions }) {
+function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces }) {
   const [open, setOpen]             = useState(false);
   const [editing, setEditing]       = useState(false);
   const [draftDist, setDraftDist]   = useState("");
   const [draftNotes, setDraftNotes] = useState("");
-  const [showMove, setShowMove]     = useState(false);
   const day = DAYS.find(d => d.id === dayId);
   const slotMeta = SLOT_TYPES[session?.wtype === "intervals" || session?.wtype === "tempo"
     || session?.wtype === "fartlek" || session?.wtype === "hills"
@@ -1369,16 +1319,10 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, weekSessi
     : session?.wtype === "rest" ? "rest"
     : "easy"] || SLOT_TYPES.rest;
   if (!session || !day) return null;
-  const isRest     = session.wtype === "rest";
-  const isStrength = session.wtype === "rest" && session.label?.includes("Strength");
-  const isBronies  = session.wtype === "bronies";
-  const isRace     = session.wtype === "race";
-  const canEdit    = !isRest && !isRace;
-
-  // Days in this week that have a real session (can be moved onto this rest day)
-  const movableDays = weekSessions
-    ? DAYS.filter(d => d.id !== dayId && weekSessions[d.id]?.wtype !== "rest" && weekSessions[d.id]?.wtype !== "race")
-    : [];
+  const isRest    = session.wtype === "rest";
+  const isBronies = session.wtype === "bronies";
+  const isRace    = session.wtype === "race";
+  const canEdit   = !isRest && !isRace;
 
   function openEdit() {
     setDraftDist(session.distance > 0 ? String(session.distance) : "");
@@ -1391,42 +1335,29 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, weekSessi
     const parsedDist = parseFloat(draftDist);
     if (!isNaN(parsedDist) && parsedDist > 0 && parsedDist !== session.distance) {
       changes.distance = parsedDist;
-      changes.summary  = session.summary?.replace(/[\d.]+km/, `${parsedDist}km`) || session.summary;
-      // Recalculate estMins proportionally if we have a reference pace
-      if (paces?.ep && session.wtype === "easy") {
-        changes.estMins = Math.round(parsedDist * paces.ep / 60);
-      } else if (paces?.ep && session.wtype === "long") {
-        changes.estMins = Math.round(parsedDist * paces.ep * 1.06 / 60);
-      }
+      // Update summary to reflect new distance
+      changes.summary = session.summary?.replace(/[\d.]+km/, `${parsedDist}km`) || session.summary;
     }
-    if (draftNotes !== session.detail) changes.detail = draftNotes;
-    if (Object.keys(changes).length > 0) onEdit && onEdit(dayId, changes);
+    if (draftNotes !== session.detail) {
+      changes.detail = draftNotes;
+    }
+    if (Object.keys(changes).length > 0) {
+      onEdit && onEdit(dayId, changes);
+    }
     setEditing(false);
   }
 
-  // Slot-type change buttons — shown for active sessions
-  const CHANGE_SLOTS = [
-    { key:"workout",  icon:"⚡", label:"Workout"  },
-    { key:"easy",     icon:"🦶", label:"Easy Run"  },
-    { key:"long",     icon:"🏔", label:"Long Run"  },
-    { key:"strength", icon:"💪", label:"Strength"  },
-    { key:"rest",     icon:"💤", label:"Rest"      },
-  ];
-
   return (
-    <div className="card" style={{marginBottom:8,overflow:"hidden",opacity:isRest&&!isStrength?0.55:1}}>
+    <div className="card" style={{marginBottom:8,overflow:"hidden",opacity:isRest?0.55:1}}>
       <div style={{display:"flex"}}>
-        <div style={{width:4,flexShrink:0,background:isStrength?"#8B0000":slotMeta.color}}/>
+        <div style={{width:4,flexShrink:0,background:slotMeta.color}}/>
         <div style={{flex:1}}>
-
-          {/* ── Header row ── */}
           <div style={{display:"flex",alignItems:"center",padding:"11px 14px",
-              cursor:isRest&&!isStrength?"default":"pointer",gap:10}}
-            onClick={() => !(isRest&&!isStrength) && setOpen(o=>!o)}>
-            <span style={{fontSize:18,flexShrink:0}}>{isStrength?"💪":slotMeta.icon}</span>
+              cursor:isRest?"default":"pointer",gap:10}}
+            onClick={() => !isRest && setOpen(o=>!o)}>
+            <span style={{fontSize:18,flexShrink:0}}>{slotMeta.icon}</span>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:11,fontWeight:700,
-                color:isStrength?"#8B0000":slotMeta.color,letterSpacing:.5,
+              <div style={{fontSize:11,fontWeight:700,color:slotMeta.color,letterSpacing:.5,
                 textTransform:"uppercase",marginBottom:1}}>{day.label}</div>
               <div style={{fontSize:13,fontWeight:600,color:"var(--ink)",
                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{session.label}</div>
@@ -1440,66 +1371,11 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, weekSessi
               {session.estMins > 0 && (
                 <div style={{fontSize:10,color:"var(--ink4)"}}>{fmtDuration(session.estMins)}</div>
               )}
-              {!(isRest&&!isStrength) && <div style={{fontSize:11,color:"var(--ink4)"}}>{open?"▲":"▼"}</div>}
+              {!isRest && <div style={{fontSize:11,color:"var(--ink4)"}}>{open?"▲":"▼"}</div>}
             </div>
           </div>
 
-          {/* ── Rest day quick actions (always visible, no expand needed) ── */}
-          {isRest && !isStrength && onDaySlotChange && (
-            <div style={{padding:"0 14px 12px",display:"flex",gap:6,flexWrap:"wrap"}}>
-              {/* Strength instead */}
-              <button
-                onClick={() => onDaySlotChange(dayId, "strength")}
-                style={{padding:"6px 12px",fontSize:12,fontWeight:600,borderRadius:"var(--r)",
-                  border:"2px solid #8B0000",background:"#fff5f5",color:"#8B0000",cursor:"pointer"}}>
-                💪 Do Strength
-              </button>
-              {/* Move a session here */}
-              {movableDays.length > 0 && (
-                <div style={{position:"relative"}}>
-                  <button
-                    onClick={() => setShowMove(m=>!m)}
-                    style={{padding:"6px 12px",fontSize:12,fontWeight:600,borderRadius:"var(--r)",
-                      border:"2px solid var(--rule)",background:"white",color:"var(--ink3)",cursor:"pointer"}}>
-                    ↕ Move Session Here
-                  </button>
-                  {showMove && (
-                    <div style={{position:"absolute",top:"100%",left:0,zIndex:50,
-                        background:"white",border:"2px solid var(--rule)",borderRadius:"var(--r)",
-                        boxShadow:"3px 3px 0 var(--rule)",minWidth:180,padding:4,marginTop:4}}>
-                      <div style={{fontSize:10,fontWeight:700,color:"var(--ink4)",
-                        letterSpacing:1,textTransform:"uppercase",padding:"6px 8px 4px"}}>
-                        Move which session?
-                      </div>
-                      {movableDays.map(d => (
-                        <button key={d.id}
-                          onClick={() => {
-                            // Swap: this day gets that session type, that day becomes rest
-                            onDaySlotChange(dayId, weekSessions[d.id].wtype === "rest" ? "rest" : "workout");
-                            onDaySlotChange(d.id, "rest");
-                            setShowMove(false);
-                          }}
-                          style={{display:"block",width:"100%",textAlign:"left",
-                            padding:"8px 10px",fontSize:12,fontWeight:600,cursor:"pointer",
-                            border:"none",background:"none",color:"var(--ink)",
-                            borderRadius:"var(--r)"}}>
-                          {DAYS.find(x=>x.id===d.id)?.label} — {weekSessions[d.id]?.label}
-                        </button>
-                      ))}
-                      <button onClick={() => setShowMove(false)}
-                        style={{display:"block",width:"100%",textAlign:"center",padding:"6px",
-                          fontSize:11,color:"var(--ink4)",border:"none",background:"none",cursor:"pointer"}}>
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Expanded detail (active sessions + strength) ── */}
-          {open && !(isRest&&!isStrength) && (
+          {open && !isRest && (
             <div style={{padding:"0 14px 14px"}}>
               <hr className="rule" style={{margin:"0 0 12px"}}/>
 
@@ -1507,67 +1383,25 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, weekSessi
                 <>
                   <p style={{fontSize:13,color:"var(--ink2)",lineHeight:1.75,
                     whiteSpace:"pre-line",marginBottom:12}}>{session.detail}</p>
-                  {!isStrength && <GarminBlock session={session} paces={paces}/>}
+                  <GarminBlock session={session} paces={paces}/>
 
-                  {canEdit && onDaySlotChange && (
-                    <div style={{marginTop:14}}>
-                      {/* Edit session button */}
-                      <button onClick={openEdit} className="btn btn-g btn-sm"
-                        style={{marginBottom:10}}>✏ Edit session</button>
-
-                      {/* Change day type */}
-                      {!isBronies && (
-                        <div>
-                          <div style={{fontSize:10,fontWeight:700,color:"var(--ink4)",
-                            letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>
-                            Change this day to:
-                          </div>
-                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                            {CHANGE_SLOTS.filter(s => s.key !== (
-                              isStrength ? "strength"
-                              : session.wtype === "long" ? "long"
-                              : session.wtype === "easy" ? "easy"
-                              : "workout"
-                            )).map(s => (
-                              <button key={s.key}
-                                onClick={() => onDaySlotChange(dayId, s.key)}
-                                style={{padding:"5px 10px",fontSize:11,fontWeight:600,
-                                  borderRadius:"var(--r)",cursor:"pointer",
-                                  border:`2px solid ${s.key==="strength"?"#8B0000":s.key==="rest"?"var(--rule)":"var(--ink)"}`,
-                                  background:s.key==="strength"?"#fff5f5":"white",
-                                  color:s.key==="strength"?"#8B0000":"var(--ink3)"}}>
-                                {s.icon} {s.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Move to another day */}
-                      {movableDays.length > 0 && (
-                        <div style={{marginTop:10}}>
-                          <div style={{fontSize:10,fontWeight:700,color:"var(--ink4)",
-                            letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>
-                            Move to another day:
-                          </div>
-                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                            {DAYS.filter(d => d.id !== dayId && weekSessions?.[d.id]?.wtype === "rest").map(d => (
-                              <button key={d.id}
-                                onClick={() => {
-                                  // Move: rest day gets this slot type, this day becomes rest
-                                  const mySlot = session.wtype === "long" ? "long"
-                                    : session.wtype === "easy" ? "easy"
-                                    : "workout";
-                                  onDaySlotChange(d.id, mySlot);
-                                  onDaySlotChange(dayId, "rest");
-                                }}
-                                style={{padding:"5px 10px",fontSize:11,fontWeight:600,
-                                  borderRadius:"var(--r)",border:"2px solid var(--rule)",
-                                  background:"white",cursor:"pointer",color:"var(--ink3)"}}>
-                                → {DAYS.find(x=>x.id===d.id)?.label}
-                              </button>
-                            ))}
-                          </div>
+                  {canEdit && (
+                    <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button onClick={openEdit} className="btn btn-g btn-sm">✏ Edit session</button>
+                      {onDaySlotChange && !isBronies && (
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          {Object.entries(SLOT_TYPES)
+                            .filter(([k]) => k !== "bronies")
+                            .map(([k, m]) => (
+                            <button key={k}
+                              onClick={() => onDaySlotChange(dayId, k)}
+                              title={`Change to ${m.label}`}
+                              style={{padding:"5px 8px",fontSize:11,fontWeight:600,
+                                borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                                background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                              {m.icon} {m.label}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -1575,6 +1409,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, weekSessi
                 </>
               ) : (
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {/* Distance editor — only shown when the session has a distance */}
                   {session.distance > 0 && (
                     <div>
                       <label className="lbl">Distance (km)</label>
@@ -1588,7 +1423,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, weekSessi
                       />
                       <div style={{fontSize:11,color:"var(--ink4)",marginTop:3}}>
                         {draftDist && !isNaN(parseFloat(draftDist)) && parseFloat(draftDist) > 0
-                          ? `Will update to ${parseFloat(draftDist)}km — weekly total recalculates`
+                          ? `Will update to ${parseFloat(draftDist)}km — reflected in weekly total and volume chart`
                           : "Enter the distance you actually want to run"}
                       </div>
                     </div>
@@ -1697,19 +1532,9 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
             borderRadius:"var(--r)",padding:"8px 12px",fontSize:12,color:"var(--accent)",
             marginBottom:12,lineHeight:1.5}}>{week.note}</div>
         )}
-        {week.volumeWarning && (
-          <div style={{background:"#fff8e0",border:"2px solid #d4800a",borderRadius:"var(--r)",
-            padding:"10px 12px",fontSize:12,color:"#7a4f00",marginBottom:12,lineHeight:1.6}}>
-            <strong>⚠ Volume jump: +{week.volumeWarning.pct}%</strong>
-            {" "}({week.volumeWarning.prevKm}km → {week.volumeWarning.thisKm}km)
-            <br/>
-            The 10% rule says weekly volume shouldn't jump more than 10% at a time — bigger jumps are where overuse injuries start. Consider adding an extra rest day or trimming the easy runs slightly this week if your body is telling you something.
-          </div>
-        )}
         {DAYS.map(d => (
           <SessionCard key={d.id} dayId={d.id} session={week.sessions?.[d.id]}
             paces={paces}
-            weekSessions={week.sessions}
             onEdit={(dayId, changes) => onEdit && onEdit(week.weekNum, dayId, changes)}
             onDaySlotChange={(dayId, slot) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot)}/>
         ))}
@@ -2400,61 +2225,17 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       )}
 
       {/* STEP 4: Days + slot types — event branch only */}
-      {step === 4 && isEvent && (() => {
-        const eventDistKm = parseFloat(data.event?.distance) || 0;
-        const isUltra = eventDistKm >= 50;
-        const hasSatLong = primarySlot(normaliseSlot(data.dayPlan?.sat)) === "long";
-        const hasSunLong = primarySlot(normaliseSlot(data.dayPlan?.sun)) === "long";
-        const hasB2B = hasSatLong && (primarySlot(normaliseSlot(data.dayPlan?.sun)) === "long" || primarySlot(normaliseSlot(data.dayPlan?.sun)) === "easy");
-        return (
-          <div>
-            <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
-              Your training week
-            </div>
-            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:16,fontStyle:"italic"}}>
-              Pick which days you'll run and what type each one should be
-            </div>
-
-            {/* Ultra back-to-back suggestion — only shown when event >= 50km */}
-            {isUltra && (
-              <div style={{background:"#fff8e0",border:"2px solid #d4800a",borderRadius:"var(--r)",
-                padding:"12px 14px",marginBottom:16,fontSize:13,color:"#4a3000",lineHeight:1.6}}>
-                <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>
-                  🏔 Ultra tip: back-to-back long runs
-                </div>
-                <p style={{marginBottom:8}}>
-                  For a {data.event?.distance} event, the most important training stimulus is
-                  back-to-back long runs on the weekend — a long Saturday followed by a medium-long Sunday.
-                  This teaches your body to run on tired legs, which is exactly what ultras demand.
-                </p>
-                <p style={{marginBottom:10,fontSize:12,color:"#7a4f00"}}>
-                  This only applies during your peak build weeks — not every weekend.
-                  If life doesn't allow it some weeks, a single long run is still valuable.
-                  Realistic &gt; perfect.
-                </p>
-                {!hasB2B ? (
-                  <button
-                    className="btn btn-sm"
-                    style={{background:"#d4800a",color:"white",border:"none",fontWeight:700,fontSize:12}}
-                    onClick={() => up("dayPlan", {
-                      ...data.dayPlan,
-                      sat: "long",
-                      sun: "easy",
-                    })}>
-                    ✓ Set Saturday long + Sunday easy
-                  </button>
-                ) : (
-                  <div style={{fontSize:12,color:"#1a6b1a",fontWeight:700}}>
-                    ✓ You already have Saturday long + Sunday — good setup for an ultra.
-                  </div>
-                )}
-              </div>
-            )}
-
-            <DayPlanPicker value={data.dayPlan} onChange={v => up("dayPlan", v)}/>
+      {step === 4 && isEvent && (
+        <div>
+          <div style={{fontFamily:"var(--display)",fontSize:32,letterSpacing:1,marginBottom:6}}>
+            Your training week
           </div>
-        );
-      })()}
+          <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
+            Pick which days you'll run and what type each one should be
+          </div>
+          <DayPlanPicker value={data.dayPlan} onChange={v => up("dayPlan", v)}/>
+        </div>
+      )}
 
       {/* STEP 4: Days for fitness branch (simpler — auto-distribute by frequency) */}
       {step === 4 && isFitness && (
@@ -2868,46 +2649,13 @@ export default function App() {
     if (!Object.keys(weekSessionOverrides).length && !Object.keys(weekSlotOverrides).length) {
       return week;
     }
-    const paces = profile ? derivePaces({
-      ...profile,
-      eventDistanceNum: parseFloat(event?.distance) || 42,
-      goalTime: event?.goalTime,
-    }) : { ep:380, tp:330, ip:300, mp:350, wucd:395 };
-    const W = makeW(paces);
     const sessions = { ...week.sessions };
-
-    // Apply session field overrides (distance, notes)
     Object.entries(weekSessionOverrides).forEach(([dayId, overrides]) => {
       if (sessions[dayId]) {
         sessions[dayId] = { ...sessions[dayId], ...overrides };
       }
     });
-
-    // Apply slot type overrides (rest, strength, workout, easy, long)
-    Object.entries(weekSlotOverrides).forEach(([dayId, newSlot]) => {
-      if (newSlot === "rest") {
-        sessions[dayId] = W.rest();
-      } else if (newSlot === "strength") {
-        sessions[dayId] = {
-          wtype:"rest", label:"Strength Training 🏋", distance:0, estMins:0,
-          summary:"Chat to the Bronies about what you SHOULD be doing",
-          detail:"Strength & conditioning day.\n\nChat to the Bronies about what you SHOULD be doing — they'll have opinions.\n\nFocus on single-leg stability, hip strength, and core work to keep you injury-free.",
-          garmin:["No running today — strength session.","Ask a Bronie what to do."],
-        };
-      } else if (newSlot === "easy") {
-        sessions[dayId] = W.easyRun(40);
-      } else if (newSlot === "long") {
-        const longKm = Object.values(sessions).find(s => s?.wtype === "long")?.distance || 12;
-        sessions[dayId] = W.longEasy(longKm, event?.type === "trail", paces.ep);
-      } else if (newSlot === "workout") {
-        sessions[dayId] = pickWorkout(W, week.weekNum, dayId, 0,
-          event?.type === "trail",
-          profile?.hillAccess || "some hills",
-          week.isDown, null, week.phase);
-      }
-    });
-
-    // Recalculate totalKm after all overrides
+    // Recalculate totalKm after distance overrides
     const totalKm = Math.round(
       DAYS.reduce((sum, d) => sum + (sessions[d.id]?.distance || 0), 0)
     );
