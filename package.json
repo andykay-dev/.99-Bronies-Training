@@ -1,19 +1,23 @@
 {
-  "name": "bronies-99-training",
-  "version": "0.1.0-beta.1",
-  "type": "module",
+  "name": "bronies-training",
   "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": { "node": ">=18" },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "@formspree/react": "2.5.1",
+    "@sentry/react": "7.119.2",
+    "@supabase/supabase-js": "^2.39.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.0"
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.1.4"
   }
 }
