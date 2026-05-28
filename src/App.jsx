@@ -216,11 +216,11 @@ const G = ({ skin }) => {
 
       /* INPUTS */
       .inp{width:100%;padding:10px 12px;border:2px solid var(--rule);border-radius:var(--r);
-        font-size:14px;color:var(--ink);background:#fff;outline:none;transition:border-color .15s;}
+        font-size:14px;color:#1E3A6E;background:#fff;outline:none;transition:border-color .15s;}
       .inp:focus{border-color:var(--ink);}
-      .inp::placeholder{color:var(--ink4);}
+      .inp::placeholder{color:#8899BB;}
       .sel{width:100%;padding:10px 12px;border:2px solid var(--rule);border-radius:var(--r);
-        font-size:14px;color:var(--ink);background:#fff;outline:none;appearance:none;cursor:pointer;}
+        font-size:14px;color:#1E3A6E;background:#fff;outline:none;appearance:none;cursor:pointer;}
       .sel:focus{border-color:var(--ink);}
 
       body[data-skin="8bit"] .inp,
@@ -233,7 +233,7 @@ const G = ({ skin }) => {
       /* LABELS */
       label.lbl{display:block;font-size:11px;font-weight:700;color:var(--ink3);
         letter-spacing:1.2px;text-transform:uppercase;margin-bottom:5px;}
-      body[data-skin="8bit"] label.lbl{font-size:8px;color:#a8c4e4;letter-spacing:1.5px;margin-bottom:6px;line-height:1.6;}
+      body[data-skin="8bit"] label.lbl{font-size:8px;color:#4a6890;letter-spacing:1.5px;margin-bottom:6px;line-height:1.6;}
 
       /* TAGS */
       .tag{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;}
@@ -371,7 +371,7 @@ function hasStrength(slots) {
 }
 
 // Workout subtype keys — treated as "workout" for planning purposes but force a specific session type
-const WORKOUT_SUBTYPES = ["hills", "fartlek", "intervals"];
+const WORKOUT_SUBTYPES = ["hills", "fartlek", "intervals", "tempo"];
 function isWorkoutSlot(p) {
   return p === "workout" || WORKOUT_SUBTYPES.includes(p);
 }
@@ -393,6 +393,12 @@ const SLOT_TYPES = {
 const DEFAULT_DAY_PLAN = {
   mon:"rest", tue:"rest", wed:"bronies", thu:"rest",
   fri:"bronies", sat:"long", sun:"rest",
+};
+// Default workout duration target per day, in minutes.
+// 45min is the standard. Users can bump certain days up to 60/75/90 in their profile.
+// On a Bronies day (Wed/Fri) the duration is often capped so they can still do coffee.
+const DEFAULT_WORKOUT_MINUTES = {
+  mon:45, tue:45, wed:45, thu:45, fri:45, sat:45, sun:45,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -1078,16 +1084,23 @@ function buildPlan(profile, event, feedbackMap) {
 }
 
 // Days considered "social" Bronie runs — no hills, no tempo, keep it accessible and fun
-function pickWorkout(W,wn,dayId,slotIdx,isTrail,hillAccess,isDown,forcedSubtype,phase){
+function pickWorkout(W,wn,dayId,slotIdx,isTrail,hillAccess,isDown,forcedSubtype,phase,targetMins){
   const hasHills=hillAccess==="lots of hills"||hillAccess==="some hills";
+  const mins = targetMins || 45;
+  // Wed/Fri default to INTERVALS (per user preference — short, sharp, coffee-compatible)
+  // unless the user explicitly chose a different subtype.
+  const isBroniesDay = dayId === "wed" || dayId === "fri";
+  if (isBroniesDay && !forcedSubtype) {
+    forcedSubtype = "intervals";
+  }
   if(forcedSubtype==="hills"){
     return hasHills
       ?(wn%2===0?W.hillRepeats(Math.min(8,4+Math.floor(wn/4))):W.hillSprints(Math.min(10,6+Math.floor(wn/4))))
-      :W.fartlek(30);
+      :W.fartlek(Math.min(45, mins));
   }
-  if(forcedSubtype==="fartlek") return W.fartlek(Math.min(45,28+Math.floor(wn/3)*3));
-  if(forcedSubtype==="intervals") return pickIntervalByPhase(W,wn,slotIdx,phase||"BUILD");
-  if(forcedSubtype==="tempo") return W.tempo(Math.min(30,15+Math.floor(wn/3)*3));
+  if(forcedSubtype==="fartlek") return W.fartlek(Math.min(mins, 28+Math.floor(wn/3)*3));
+  if(forcedSubtype==="intervals") return pickIntervalByPhase(W,wn,slotIdx,phase||"BUILD",mins);
+  if(forcedSubtype==="tempo") return W.tempo(Math.min(mins-20, 15+Math.floor(wn/3)*3));
   if(isDown){
     // Down weeks: a single light quality touch, rotating so consecutive down weeks differ.
     const downPool=[
@@ -1112,27 +1125,52 @@ function pickWorkout(W,wn,dayId,slotIdx,isTrail,hillAccess,isDown,forcedSubtype,
   }
 
   const isThresholdSlot = slotIdx >= 1; // 2nd workout of the week = threshold/tempo
-  if (isThresholdSlot) return pickThresholdWorkout(W, wn, ph);
-  return pickSpeedWorkout(W, wn, ph);
+  if (isThresholdSlot) return pickThresholdWorkout(W, wn, ph, mins);
+  return pickSpeedWorkout(W, wn, ph, mins);
 }
 
 // SPEED / VO2max sessions — short-to-medium reps, building in length through the phases.
-// BASE: shorter reps to introduce speed. BUILD: classic VO2max reps. PEAK: race-specific longer reps.
-function pickSpeedWorkout(W, wn, phase) {
+// targetMins controls the session size: 45 = default, 60-75 = more reps, 90 = max volume.
+function pickSpeedWorkout(W, wn, phase, targetMins) {
+  const m = targetMins || 45;
+  // Scale rep counts based on target duration. Each "tier" adds ~15min of work.
+  const big = m >= 75, medium = m >= 60;
   let pool;
   if (phase === "BASE") {
-    pool = [
+    pool = big ? [
+      () => W.reps400(10, 75), () => W.reps800(6, 90),
+      () => W.reps400(12, 75), () => W.fartlek(45),
+    ] : medium ? [
+      () => W.reps400(8, 90), () => W.reps800(5, 90),
+      () => W.reps400(10, 75), () => W.fartlek(40),
+    ] : [
       () => W.reps400(6, 90), () => W.reps800(4, 90),
       () => W.reps400(8, 75), () => W.fartlek(32),
     ];
   } else if (phase === "PEAK") {
-    pool = [
-      () => W.intervals(6, 90), () => W.reps1200(4, 90),
+    pool = big ? [
+      () => W.intervals(8, 90), () => W.reps1200(5, 90),
+      () => W.combo2k1k1k(), () => W.reps2k(3, 120),
+      () => W.combo2x2k(), () => W.ladder([4, 3, 2, 1, 2, 3, 4, 4]),
+    ] : medium ? [
+      () => W.intervals(7, 90), () => W.reps1200(4, 90),
       () => W.combo2k1k1k(), () => W.reps2k(2, 120),
       () => W.combo2x2k(), () => W.ladder([4, 3, 2, 1, 2, 3, 4]),
+    ] : [
+      () => W.intervals(5, 90), () => W.reps1200(3, 90),
+      () => W.reps2k(2, 120), () => W.intervals(6, 90),
+      () => W.reps800(6, 90), () => W.combo800s400s(),
     ];
   } else { // BUILD
-    pool = [
+    pool = big ? [
+      () => W.intervals(7, 90), () => W.reps800(8, 90),
+      () => W.reps1200(5, 90), () => W.combo800s400s(),
+      () => W.ladder([3, 2, 1, 2, 3, 4]), () => W.combo1200s400s(),
+    ] : medium ? [
+      () => W.intervals(6, 90), () => W.reps800(7, 90),
+      () => W.reps1200(4, 90), () => W.combo800s400s(),
+      () => W.ladder([3, 2, 1, 2, 3]), () => W.combo1200s400s(),
+    ] : [
       () => W.intervals(5, 90), () => W.reps800(6, 90),
       () => W.reps1200(3, 90), () => W.combo800s400s(),
       () => W.ladder([3, 2, 1, 2, 3]), () => W.combo1200s400s(),
@@ -1142,24 +1180,26 @@ function pickSpeedWorkout(W, wn, phase) {
 }
 
 // THRESHOLD / TEMPO sessions — sustained "comfortably hard" work, building in duration.
-// These raise the lactate threshold (the pace you can hold for ~an hour).
-function pickThresholdWorkout(W, wn, phase) {
+// targetMins controls the tempo length. Tempo time = mins - 20 (for warm-up + cool-down).
+function pickThresholdWorkout(W, wn, phase, targetMins) {
+  const m = targetMins || 45;
+  const tempoMins = Math.max(12, m - 20); // 25 for 45min, 40 for 60min, 55 for 75min
   let pool;
   if (phase === "BASE") {
     pool = [
-      () => W.tempo(15), () => W.progression(35),
-      () => W.onOff(8, 60, 60), () => W.tempo(18),
+      () => W.tempo(Math.min(tempoMins, 18)), () => W.progression(m - 10),
+      () => W.onOff(Math.min(12, 8 + (m-45)/5), 60, 60), () => W.tempo(Math.min(tempoMins, 20)),
     ];
   } else if (phase === "PEAK") {
     pool = [
-      () => W.tempo(28), () => W.overUnder(5),
-      () => W.progression(45), () => W.tempoStrides(25),
-      () => W.tempo(30),
+      () => W.tempo(tempoMins), () => W.overUnder(Math.min(6, 5 + (m-45)/15)),
+      () => W.progression(m - 5), () => W.tempoStrides(tempoMins),
+      () => W.tempo(Math.min(tempoMins + 2, 45)),
     ];
   } else { // BUILD
     pool = [
-      () => W.tempo(20), () => W.overUnder(4),
-      () => W.progression(40), () => W.tempoStrides(20),
+      () => W.tempo(Math.min(tempoMins, 35)), () => W.overUnder(Math.min(5, 4 + (m-45)/15)),
+      () => W.progression(m - 10), () => W.tempoStrides(Math.min(tempoMins, 30)),
       () => W.tempo(24),
     ];
   }
@@ -1173,13 +1213,19 @@ function pickTaperWorkout(W,wn,slotIdx){
   return pool[wn%pool.length]();
 }
 
-function pickIntervalByPhase(W,wn,slotIdx,phase){
-  if(phase==="BASE") return (wn+slotIdx)%2===0?W.reps400(6,90):W.reps800(4,90);
+function pickIntervalByPhase(W,wn,slotIdx,phase,targetMins){
+  const m = targetMins || 45;
+  const big = m >= 75, medium = m >= 60;
+  if(phase==="BASE") return (wn+slotIdx)%2===0?W.reps400(big?10:medium?8:6,90):W.reps800(big?6:medium?5:4,90);
   if(phase==="PEAK"){
-    const opts=[()=>W.reps1200(4,90),()=>W.intervals(6,90),()=>W.combo2k1k1k(),()=>W.reps2k(2,120)];
+    const opts = big ? [()=>W.reps1200(5,90),()=>W.intervals(8,90),()=>W.combo2k1k1k(),()=>W.reps2k(3,120)]
+               : medium ? [()=>W.reps1200(4,90),()=>W.intervals(7,90),()=>W.combo2k1k1k(),()=>W.reps2k(2,120)]
+                        : [()=>W.reps1200(3,90),()=>W.intervals(5,90),()=>W.combo2k1k1k(),()=>W.reps2k(2,120)];
     return opts[(wn+slotIdx)%opts.length]();
   }
-  const opts=[()=>W.intervals(4,90),()=>W.reps800(5,90),()=>W.reps1200(3,90),()=>W.combo800s400s()];
+  const opts = big ? [()=>W.intervals(6,90),()=>W.reps800(7,90),()=>W.reps1200(5,90),()=>W.combo800s400s()]
+             : medium ? [()=>W.intervals(5,90),()=>W.reps800(6,90),()=>W.reps1200(4,90),()=>W.combo800s400s()]
+                      : [()=>W.intervals(4,90),()=>W.reps800(5,90),()=>W.reps1200(3,90),()=>W.combo800s400s()];
   return opts[(wn+slotIdx)%opts.length]();
 }
 
@@ -1430,11 +1476,14 @@ function buildSlot(slots, W, ctx) {
       session = { ...W.easyRun(30, true), label:"Easy + 3 Fast Strides",
         summary:"30min easy + 3×1min fast — final tune-up" };
     } else {
-      // forcedSubtype (from user swap) wins; else a workout-subtype day name forces that type
+      // forcedSubtype (from user swap) wins; else a workout-subtype day name forces that type.
+      // targetMins from profile.workoutMinutes lets users set longer Monday workouts (e.g. 60-90min)
+      // vs shorter Wednesday workouts (e.g. 45min) so they can still meet the crew for coffee.
+      const targetMins = profile?.workoutMinutes?.[dayId] || 45;
       session = pickWorkout(W, wn, dayId, slotIdx, isTrail,
         profile?.hillAccess || "some hills", isDown,
         forcedSubtype || (WORKOUT_SUBTYPES.includes(primary) ? primary : null),
-        phase);
+        phase, targetMins);
     }
   } else {
     session = W.rest();
@@ -2353,14 +2402,66 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                         </div>
                       )}
 
-                      {/* Workout sessions also get Edit button for distance/notes */}
+                      {/* Workout sessions: edit + change to another type + change workout subtype */}
                       {(session.wtype === "intervals" || session.wtype === "tempo" ||
                         session.wtype === "fartlek" || session.wtype === "hills" ||
                         session.wtype === "onoff" || session.wtype === "overunder" ||
                         session.wtype === "ladder" || session.wtype === "progression") && (
-                        <button onClick={openEdit} className="btn btn-g btn-sm" style={{alignSelf:"flex-start"}}>
-                          ✏ Edit distance / notes
-                        </button>
+                        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                          <button onClick={openEdit} className="btn btn-g btn-sm" style={{alignSelf:"flex-start"}}>
+                            ✏ Edit distance / notes
+                          </button>
+                          {onDaySlotChange && (
+                            <>
+                              {/* Swap workout subtype — intervals / tempo / hills / fartlek */}
+                              <div>
+                                <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
+                                  letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
+                                  Did a different workout? Swap to:
+                                </div>
+                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                  {[
+                                    {key:"intervals", icon:"⚡", label:"Intervals"},
+                                    {key:"tempo",     icon:"🌊", label:"Tempo"},
+                                    {key:"hills",     icon:"⛰",  label:"Hills"},
+                                    {key:"fartlek",   icon:"🎲", label:"Fartlek"},
+                                  ].filter(s => s.key !== session.wtype).map(s => (
+                                    <button key={s.key}
+                                      onClick={() => onDaySlotChange(dayId, s.key)}
+                                      style={{padding:"5px 8px",fontSize:11,fontWeight:600,
+                                        borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                                        background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                                      {s.icon} {s.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {/* Swap to a non-workout day type — easy / long / bronies / rest */}
+                              <div>
+                                <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
+                                  letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
+                                  Or change this day to:
+                                </div>
+                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                  {[
+                                    {key:"easy",    icon:"🦶", label:"Easy Run"},
+                                    {key:"long",    icon:"🏔", label:"Long Run"},
+                                    {key:"bronies", icon:"☕", label:"BRONIES"},
+                                    {key:"rest",    icon:"💤", label:"Rest"},
+                                  ].map(m => (
+                                    <button key={m.key}
+                                      onClick={() => onDaySlotChange(dayId, m.key)}
+                                      style={{padding:"5px 8px",fontSize:11,fontWeight:600,
+                                        borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                                        background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                                      {m.icon} {m.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       )}
 
                     </div>
@@ -2992,7 +3093,8 @@ const store = {
     } catch { return { keys: [] }; }
   },
 
-  // After login: push any offline localStorage data up to Supabase
+  // After login: push any offline localStorage data up to Supabase, but DO NOT
+  // overwrite existing cloud data — that would wipe out a user's plan from another device.
   async migrateLocalToSupabase() {
     const uid = await getUid();
     if (!uid) return;
@@ -3001,6 +3103,12 @@ const store = {
       try {
         const raw = localStorage.getItem(`${APP_ID}:${key}`);
         if (!raw) continue;
+        // Only push if cloud has no value for this key — never overwrite existing cloud data.
+        const { data: existing } = await supabase
+          .from("app_data").select("key")
+          .eq("user_id", uid).eq("app_id", APP_ID).eq("key", key)
+          .maybeSingle();
+        if (existing) continue;
         let jsonVal; try { jsonVal = JSON.parse(raw); } catch { jsonVal = raw; }
         await supabase.from("app_data").upsert({
           user_id: uid, app_id: APP_ID, key,
@@ -4814,7 +4922,6 @@ function AuthScreen({ onAuth, onSkip }) {
     setLoading(true); setError(null);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) { setError(error.message); setLoading(false); return; }
-    await store.migrateLocalToSupabase();
     onAuth();
   }
 
@@ -4902,9 +5009,10 @@ function AuthScreen({ onAuth, onSkip }) {
         </div>
       </div>
 
-      {/* Card */}
-      <div style={{background:"var(--white)",borderRadius:12,padding:"24px 20px",
-        width:"100%",maxWidth:400,boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
+      {/* Card — always uses light background so inputs are readable on both themes */}
+      <div style={{background:"#ffffff",borderRadius:12,padding:"24px 20px",
+        width:"100%",maxWidth:400,boxShadow:"0 8px 40px rgba(0,0,0,.3)",
+        color:"#1E3A6E"}}>
 
         {error && (
           <div style={{marginBottom:14,padding:"10px 12px",background:"#fce8e8",
@@ -5084,11 +5192,16 @@ export default function App() {
   }
 
   // Called when the user successfully signs in via the optional overlay.
-  // Pushes any on-device data up to the cloud, then re-reads (now-synced) state.
+  // ORDER MATTERS: load cloud data FIRST (so an existing plan from another device shows up),
+  // THEN migrate any local-only keys up. The migration is non-destructive — it won't
+  // overwrite cloud data. This is what makes cross-device sync actually work on a fresh device.
   async function handleAuthSuccess() {
     setShowAuth(false);
-    try { await store.migrateLocalToSupabase(); } catch {}
+    // Brief delay to ensure the Supabase SDK has fully persisted the session before
+    // store.get() calls getUid() — avoids a race on fresh signins.
+    await new Promise(r => setTimeout(r, 150));
     await loadPersistedState();
+    try { await store.migrateLocalToSupabase(); } catch {}
     showToast("Signed in — your plan is now synced ☁");
   }
 
@@ -5173,6 +5286,19 @@ export default function App() {
     setProfile(updated);
     try { store.set("bep6_profile", JSON.stringify(updated)); } catch {}
     showToast("Weekly schedule updated — plan rebuilt");
+  }
+
+  // Update the target workout duration for a specific day.
+  // Affects how many reps / how long the tempo gets — Monday can be 80min, Wednesday 45min
+  // so the user can still meet the crew for coffee after a Bronies-day workout.
+  function handleWorkoutMinutesUpdate(dayId, mins) {
+    const currentMap = profile.workoutMinutes || DEFAULT_WORKOUT_MINUTES;
+    const updated = {
+      ...profile,
+      workoutMinutes: { ...currentMap, [dayId]: mins },
+    };
+    setProfile(updated);
+    try { store.set("bep6_profile", JSON.stringify(updated)); } catch {}
   }
 
   // Save a manual edit to a single session (distance, notes, label).
@@ -5599,6 +5725,55 @@ export default function App() {
                 <DayPlanPicker value={profile.dayPlan} onChange={handleDayPlanUpdate}/>
               </div>
             )}
+            {!isHangout && (() => {
+              const wkPlan = profile.dayPlan || DEFAULT_DAY_PLAN;
+              const wkMins = profile.workoutMinutes || DEFAULT_WORKOUT_MINUTES;
+              // Show duration controls only for days that have a workout-type slot —
+              // BRONIES days, easy days, and long days don't need a workout-duration target.
+              const workoutDays = DAYS.filter(d => {
+                const slot = primarySlot(normaliseSlot(wkPlan[d.id]));
+                return isWorkoutSlot(slot);
+              });
+              if (workoutDays.length === 0) return null;
+              return (
+                <div className="card" style={{padding:16,marginBottom:12}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"var(--ink3)",letterSpacing:.8,textTransform:"uppercase",marginBottom:4}}>
+                    Workout duration
+                  </div>
+                  <div style={{fontSize:12,color:"var(--ink3)",marginBottom:12,fontStyle:"italic"}}>
+                    How long do you want each workout to go for? Longer = more reps / longer tempo.
+                    Wednesday Bronies day workouts are usually kept shorter so you can make coffee.
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {workoutDays.map(d => {
+                      const current = wkMins[d.id] || 45;
+                      return (
+                        <div key={d.id} style={{display:"flex",alignItems:"center",gap:10}}>
+                          <span style={{fontSize:12,fontWeight:700,color:"var(--ink2)",
+                            minWidth:60,letterSpacing:.5,textTransform:"uppercase"}}>
+                            {d.label}
+                          </span>
+                          <div style={{display:"flex",gap:4,flex:1,flexWrap:"wrap"}}>
+                            {[45, 60, 75, 90].map(opt => (
+                              <button key={opt}
+                                onClick={() => handleWorkoutMinutesUpdate(d.id, opt)}
+                                style={{padding:"5px 10px",fontSize:11,fontWeight:700,
+                                  borderRadius:"var(--r)",cursor:"pointer",
+                                  border:`2px solid ${current===opt?"var(--ink)":"var(--rule)"}`,
+                                  background:current===opt?"var(--ink)":"white",
+                                  color:current===opt?"white":"var(--ink3)",
+                                  transition:"all .15s"}}>
+                                {opt}min
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
             <button onClick={() => setScreen("onboarding")} className="btn btn-o" style={{width:"100%",marginBottom:10}}>
               ✏ Update profile
             </button>
