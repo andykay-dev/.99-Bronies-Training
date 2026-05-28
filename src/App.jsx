@@ -2140,13 +2140,15 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
     : session?.wtype === "rest" ? "rest"
     : "easy"] || SLOT_TYPES.rest;
   if (!session || !day) return null;
-  const isRest    = session.wtype === "rest";
+  const isStrength = session.wtype === "rest" && (session.label || "").includes("Strength");
+  const isRest    = session.wtype === "rest" && !isStrength;
   const isBronies = session.wtype === "bronies";
   const isRace    = session.wtype === "race";
-  const canEdit   = !isRest && !isRace;
+  const canEdit   = !isRest && !isRace && !isStrength;
   const canChangeSlot = !isRace; // Rest days can be changed to any other type
 
-  // Completion tracking — only shown for past + today sessions that aren't rest
+  // Completion tracking — shown for past + today sessions that aren't a true rest day.
+  // Strength days (stored as wtype "rest" but labelled Strength) DO get "yes I did".
   const showCompletion = (isPast || isToday) && !isRest && !isRace && completionKey && onCompletion;
   const completionVal  = completionMap?.[completionKey] || null;
   const COMPLETION_OPTS = [
@@ -2312,6 +2314,32 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                     whiteSpace:"pre-line",marginBottom:12}}>{session.detail}</p>
 
                   <GarminBlock session={session} paces={paces}/>
+
+                  {/* Strength day — allow swapping to a run if plans change */}
+                  {isStrength && onDaySlotChange && (
+                    <div style={{marginTop:12}}>
+                      <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
+                        letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
+                        Change this day to:
+                      </div>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                        {[
+                          {key:"workout", icon:"⚡", label:"Workout"},
+                          {key:"easy",    icon:"🦶", label:"Easy Run"},
+                          {key:"long",    icon:"🏔", label:"Long Run"},
+                          {key:"rest",    icon:"💤", label:"Rest"},
+                        ].map(m => (
+                          <button key={m.key}
+                            onClick={() => onDaySlotChange(dayId, m.key)}
+                            style={{padding:"5px 8px",fontSize:11,fontWeight:600,
+                              borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                              background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                            {m.icon} {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {canEdit && (
                     <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
@@ -2660,11 +2688,12 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
 //  UI: Plan overview with filters
 // ─────────────────────────────────────────────────────────────
 const FILTERS = {
-  all:     { label:"All",       icon:"📋" },
-  long:    { label:"Long Runs", icon:"🏔", slot:"long" },
-  workout: { label:"Workouts",  icon:"⚡", slot:"workout" },
-  easy:    { label:"Easy Runs", icon:"🦶", slot:"easy" },
-  bronies: { label:"BRONIES",   icon:"☕", slot:"bronies" },
+  all:      { label:"All",       icon:"📋" },
+  long:     { label:"Long Runs", icon:"🏔", slot:"long" },
+  workout:  { label:"Workouts",  icon:"⚡", slot:"workout" },
+  easy:     { label:"Easy Runs", icon:"🦶", slot:"easy" },
+  bronies:  { label:"BRONIES",   icon:"☕", slot:"bronies" },
+  strength: { label:"Strength",  icon:"🏋", slot:"strength" },
 };
 
 function findSessionByWtype(week, wtype) {
@@ -2678,6 +2707,7 @@ function findSessionByWtype(week, wtype) {
     if (wtype === "long" && s.wtype === "long") return { session:s, dayId:d.id, dayLabel:d.short };
     if (wtype === "easy" && s.wtype === "easy") return { session:s, dayId:d.id, dayLabel:d.short };
     if (wtype === "bronies" && s.wtype === "bronies") return { session:s, dayId:d.id, dayLabel:d.short };
+    if (wtype === "strength" && s.wtype === "rest" && (s.label || "").includes("Strength")) return { session:s, dayId:d.id, dayLabel:d.short };
   }
   return null;
 }
@@ -2815,10 +2845,14 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
               <div style={{padding:"0 var(--pad-x) 10px 52px",display:"flex",flexDirection:"column",gap:4}}>
                 {DAYS.filter(d => {
                     const s = w.sessions?.[d.id];
-                    if (!s || s.wtype === "rest") return false;
+                    if (!s) return false;
+                    const isStrengthDay = s.wtype === "rest" && (s.label || "").includes("Strength");
+                    // Hide true rest days (but keep strength days, which are stored as "rest").
+                    if (s.wtype === "rest" && !isStrengthDay) return false;
                     // When a filter is active, only show days whose session matches the filter.
                     if (filter === "all") return true;
                     if (filter === "workout") return ["intervals","tempo","fartlek","hills","onoff","overunder","ladder","progression"].includes(s.wtype);
+                    if (filter === "strength") return isStrengthDay;
                     return s.wtype === cfg.slot;
                   })
                   .slice(0, 4)
@@ -2829,7 +2863,9 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
                     const ck      = `${w.weekNum}:${d.id}`;
                     const cv      = completionMap?.[ck] || null;
                     const eligible = (past || today) && completionMap && onCompletion;
-                    const slotColor = SLOT_TYPES[
+                    const slotColor = (w.sessions[d.id].wtype === "rest" && (w.sessions[d.id].label || "").includes("Strength"))
+                      ? SLOT_TYPES.strength?.color || "#8B0000"
+                      : SLOT_TYPES[
                       w.sessions[d.id].wtype === "long" ? "long"
                       : w.sessions[d.id].wtype === "bronies" ? "bronies"
                       : w.sessions[d.id].wtype === "easy" ? "easy"
@@ -4908,7 +4944,7 @@ function StatsScreen({ plan, completionMap, feedbackMap, profile, event }) {
 // ─────────────────────────────────────────────────────────────
 //  AUTH SCREEN — Login / Signup / Forgot password
 // ─────────────────────────────────────────────────────────────
-function AuthScreen({ onAuth, onSkip }) {
+function AuthScreen({ onAuth, onSkip, skin }) {
   const [mode,     setMode]     = useState("login"); // "login" | "signup" | "forgot"
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
@@ -4954,6 +4990,7 @@ function AuthScreen({ onAuth, onSkip }) {
   };
 
   if (sent && mode === "signup") return (
+    <><G skin={skin}/>
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:"var(--nav)",padding:"24px var(--pad-x)"}}>
       <div style={{maxWidth:400,width:"100%",textAlign:"center"}}>
@@ -4969,10 +5006,11 @@ function AuthScreen({ onAuth, onSkip }) {
           Back to Login
         </button>
       </div>
-    </div>
+    </div></>
   );
 
   if (sent && mode === "forgot") return (
+    <><G skin={skin}/>
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:"var(--nav)",padding:"24px var(--pad-x)"}}>
       <div style={{maxWidth:400,width:"100%",textAlign:"center"}}>
@@ -4987,10 +5025,11 @@ function AuthScreen({ onAuth, onSkip }) {
           Back to Login
         </button>
       </div>
-    </div>
+    </div></>
   );
 
   return (
+    <><G skin={skin}/>
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",
       alignItems:"center",justifyContent:"center",
       background:"var(--nav)",padding:"24px var(--pad-x)"}}>
@@ -5115,7 +5154,7 @@ function AuthScreen({ onAuth, onSkip }) {
           fontSize:11,color:"rgba(255,255,255,.35)",cursor:"pointer",padding:4}}>
         Maybe later — keep using on this device →
       </button>
-    </div>
+    </div></>
   );
 }
 
@@ -5229,16 +5268,17 @@ export default function App() {
 
   // Show nothing until we know if there's a session (avoids flash)
   if (!authReady) return (
+    <><G skin={skin}/>
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",
       justifyContent:"center",background:"var(--nav)"}}>
       <div style={{fontFamily:"var(--mono)",fontSize:14,color:"var(--gold)",letterSpacing:2}}>
         LOADING…
       </div>
-    </div>
+    </div></>
   );
 
   // Optional sign-in overlay — app is usable without it (data saved on-device)
-  if (showAuth) return <AuthScreen onAuth={handleAuthSuccess} onSkip={() => setShowAuth(false)} />;
+  if (showAuth) return <AuthScreen onAuth={handleAuthSuccess} onSkip={() => setShowAuth(false)} skin={skin} />;
 
   function showToast(m) { setToast(m); setTimeout(() => setToast(""), 2500); }
 
