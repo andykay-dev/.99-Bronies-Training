@@ -547,6 +547,38 @@ function weeksUntil(d) {
   return d ? Math.max(1, Math.floor((new Date(d)-TODAY)/(1000*60*60*24*7))) : 16;
 }
 
+// Total weeks spanning two dates (Monday-anchored). Used so the plan's length
+// reflects the original start date, not "today", so past weeks stay in the plan.
+function weeksBetween(fromDateStr, toDateStr) {
+  const a = parseLocalDate(fromDateStr);
+  const b = parseLocalDate(toDateStr);
+  if (!a || !b) return 16;
+  const aMonday = mondayOf(a);
+  const bMonday = mondayOf(b);
+  return Math.max(1, Math.round((bMonday - aMonday) / (1000*60*60*24*7)));
+}
+
+function mondayOf(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun, 1=Mon ... 6=Sat
+  const diff = (day === 0 ? -6 : 1 - day);
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Returns the Monday date string for week offset i from an anchor date.
+function dateFromAnchor(anchorStr, i) {
+  const anchor = parseLocalDate(anchorStr);
+  if (!anchor) return dateFromToday(i);
+  const monday = mondayOf(anchor);
+  monday.setDate(monday.getDate() + i * 7);
+  const yy = monday.getFullYear();
+  const mm = String(monday.getMonth() + 1).padStart(2, "0");
+  const dd = String(monday.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
 function dateFromToday(w) {
   // Returns the Monday date for week offset w (0 = this week's Monday).
   // Always Mon-anchored so day indices 0–6 = Mon–Sun correctly.
@@ -1232,7 +1264,12 @@ function pickIntervalByPhase(W,wn,slotIdx,phase,targetMins){
 
 
 function buildEventPlan(profile, event, dayPlan, fb) {
-  const trainingWks = Math.min(24, weeksUntil(event.date));
+  // Anchor the plan to the date the user first created it (planStartDate). This is what
+  // keeps past, completed weeks in the plan as time passes — without it, every render
+  // would generate a fresh plan starting "today", erasing history.
+  const planAnchor  = profile.planStartDate || todaySydney();
+  const totalSpan   = Math.min(24, weeksBetween(planAnchor, event.date));
+  const trainingWks = Math.max(1, totalSpan);
   const total       = trainingWks + 1;
   const isTrail     = event.type === "trail";
   const distNum     = parseFloat(event.distance) || 42;
@@ -1290,7 +1327,7 @@ function buildEventPlan(profile, event, dayPlan, fb) {
     const isTaper    = phase === "TAPER";
     const isRaceWk   = phase === "RACE";
     const pct        = wn / trainingWks;
-    const startDate  = dateFromToday(i);
+    const startDate  = dateFromAnchor(planAnchor, i);
     const taperWkIdx = isTaper ? wn - (trainingWks - 2) : 0;
 
     const prevFb = fb[wn - 1];
@@ -1621,6 +1658,7 @@ function buildBeginnerSession(runKm, pct, ep, isFirst) {
 }
 
 function buildOngoingPlan(profile, dayPlan, fb) {
+  const planAnchor = profile.planStartDate || todaySydney();
   const isHealthy   = profile.trainingGoal === "healthier";
   const isHangout   = profile.trainingGoal === "hangout";
 
@@ -1645,7 +1683,7 @@ function buildOngoingPlan(profile, dayPlan, fb) {
       });
       const totalKm = Math.round(DAYS.reduce((s, d) => s + (sessions[d.id]?.distance || 0), 0));
       return {
-        weekNum: wn, phase:"BASE", startDate: dateFromToday(i),
+        weekNum: wn, phase:"BASE", startDate: dateFromAnchor(planAnchor, i),
         isDown:false, isPeakLong:false, isOngoing:true,
         sessions, totalKm,
         longRunMins: Object.values(sessions).find(s => s?.wtype === "long")?.estMins || 0,
@@ -1731,7 +1769,7 @@ function buildOngoingPlan(profile, dayPlan, fb) {
       : "";
 
     return {
-      weekNum: wn, phase: "BASE", startDate: dateFromToday(i),
+      weekNum: wn, phase: "BASE", startDate: dateFromAnchor(planAnchor, i),
       isDown, isPeakLong: isGoalWeek,
       sessions, totalKm,
       longRunMins: 0,
@@ -2211,23 +2249,28 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
                 textDecoration: isPast && !isRest ? "line-through" : "none"}}>{session.summary}</div>
 
-              {/* Completion buttons — prominent inline buttons on past/today sessions */}
+              {/* Completion buttons — shown on past/today sessions, neither pre-selected.
+                  User must explicitly tap Yeah Broo or Nup. */}
               {showCompletion && (
                 <div style={{display:"flex",gap:5,marginTop:8}} onClick={e => e.stopPropagation()}>
-                  {COMPLETION_OPTS.map(o => (
-                    <button key={o.value} onClick={() => onCompletion(completionKey, o.value)}
-                      style={{
-                        padding:"5px 11px",fontSize:11,fontWeight:700,cursor:"pointer",
-                        borderRadius:20,
-                        border:`2px solid ${completionVal===o.value ? o.col : "#bbb"}`,
-                        background: completionVal===o.value ? o.col : "white",
-                        color: completionVal===o.value ? "white" : "#666",
-                        transition:"all .15s",
-                        boxShadow: completionVal===o.value ? "none" : "0 1px 3px rgba(0,0,0,0.08)",
-                      }}>
-                      {o.label}
-                    </button>
-                  ))}
+                  {COMPLETION_OPTS.map(o => {
+                    const isSelected = completionVal === o.value;
+                    return (
+                      <button key={o.value} onClick={() => onCompletion(completionKey, o.value)}
+                        style={{
+                          padding:"5px 11px",fontSize:11,fontWeight:700,cursor:"pointer",
+                          borderRadius:20,
+                          border:`2px solid ${isSelected ? o.col : o.col}`,
+                          background: isSelected ? o.col : "white",
+                          color: isSelected ? "white" : o.col,
+                          transition:"all .15s",
+                          boxShadow: isSelected ? "none" : "0 1px 3px rgba(0,0,0,0.08)",
+                          opacity: isSelected || !completionVal ? 1 : 0.4,
+                        }}>
+                        {o.label}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2344,7 +2387,9 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                   {canEdit && (
                     <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
 
-                      {/* Workout sub-type picker — shown for workout sessions */}
+                      {/* Workout sub-type picker — shown for workout sessions.
+                          Workouts already used elsewhere in the week are disabled, so the user
+                          doesn't end up with two of the same kind of session in one week. */}
                       {(session.wtype === "intervals" || session.wtype === "tempo" ||
                         session.wtype === "fartlek" || session.wtype === "hills" ||
                         session.wtype === "onoff" || session.wtype === "overunder" ||
@@ -2355,27 +2400,56 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                             Swap workout type
                           </div>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                            {[
-                              { key:"hills",     label:"Hills",     icon:"⛰",  desc:"Uphill reps — build power and strength" },
-                              { key:"fartlek",   label:"Fartlek",   icon:"🌀",  desc:"Unstructured speed play — run by feel" },
-                              { key:"intervals", label:"Intervals", icon:"⚡",  desc:"Timed reps with structured recovery" },
-                            ].map(wt => {
-                              const isActive = session.wtype === wt.key ||
-                                (wt.key === "intervals" && ["onoff","overunder","ladder","progression"].includes(session.wtype));
-                              return (
-                                <button key={wt.key}
-                                  onClick={() => onDaySlotChange(dayId, "workout", wt.key)}
-                                  title={wt.desc}
-                                  style={{padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",
-                                    borderRadius:"var(--r)",
-                                    border:`2px solid ${isActive ? SLOT_TYPES.workout.color : "var(--rule)"}`,
-                                    background: isActive ? SLOT_TYPES.workout.color : "white",
-                                    color: isActive ? "white" : "var(--ink3)",
-                                    transition:"all .15s"}}>
-                                  {wt.icon} {wt.label}
-                                </button>
-                              );
-                            })}
+                            {(() => {
+                              // Categorise a session's wtype into one of the four user-facing categories
+                              const categoryOf = (wt) => {
+                                if (["intervals","onoff","overunder","ladder","progression"].includes(wt)) return "intervals";
+                                if (wt === "tempo") return "tempo";
+                                if (wt === "hills") return "hills";
+                                if (wt === "fartlek") return "fartlek";
+                                return null;
+                              };
+                              // Find workout categories already used on OTHER days this week
+                              const usedElsewhere = new Set();
+                              if (weekSessions) {
+                                for (const d of DAYS) {
+                                  if (d.id === dayId) continue;
+                                  const cat = categoryOf(weekSessions[d.id]?.wtype);
+                                  if (cat) usedElsewhere.add(cat);
+                                }
+                              }
+                              const myCategory = categoryOf(session.wtype);
+                              return [
+                                { key:"intervals", label:"Intervals", icon:"⚡", desc:"Timed reps with structured recovery" },
+                                { key:"tempo",     label:"Tempo",     icon:"🌊", desc:"Sustained comfortably-hard effort" },
+                                { key:"hills",     label:"Hills",     icon:"⛰",  desc:"Uphill reps — build power and strength" },
+                                { key:"fartlek",   label:"Fartlek",   icon:"🌀",  desc:"Unstructured speed play — run by feel" },
+                              ].map(wt => {
+                                const isActive = myCategory === wt.key;
+                                const isUsedElsewhere = usedElsewhere.has(wt.key);
+                                const disabled = isUsedElsewhere && !isActive;
+                                return (
+                                  <button key={wt.key}
+                                    disabled={disabled}
+                                    onClick={() => !disabled && onDaySlotChange(dayId, "workout", wt.key)}
+                                    title={disabled ? `Already programmed elsewhere this week — pick a different type` : wt.desc}
+                                    style={{padding:"7px 12px",fontSize:12,fontWeight:700,
+                                      cursor: disabled ? "not-allowed" : "pointer",
+                                      borderRadius:"var(--r)",
+                                      border:`2px solid ${isActive ? SLOT_TYPES.workout.color : "var(--rule)"}`,
+                                      background: isActive ? SLOT_TYPES.workout.color : "white",
+                                      color: isActive ? "white" : "var(--ink3)",
+                                      opacity: disabled ? 0.35 : 1,
+                                      transition:"all .15s"}}>
+                                    {wt.icon} {wt.label}
+                                    {disabled && <span style={{fontSize:9,marginLeft:3,fontWeight:400}}>· in week</span>}
+                                  </button>
+                                );
+                              });
+                            })()}
+                          </div>
+                          <div style={{fontSize:11,color:"var(--ink4)",marginTop:6,fontStyle:"italic"}}>
+                            Your two weekly workouts should target different systems — speed vs threshold.
                           </div>
                         </div>
                       )}
@@ -2441,30 +2515,8 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                           </button>
                           {onDaySlotChange && (
                             <>
-                              {/* Swap workout subtype — intervals / tempo / hills / fartlek */}
-                              <div>
-                                <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
-                                  letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
-                                  Did a different workout? Swap to:
-                                </div>
-                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                                  {[
-                                    {key:"intervals", icon:"⚡", label:"Intervals"},
-                                    {key:"tempo",     icon:"🌊", label:"Tempo"},
-                                    {key:"hills",     icon:"⛰",  label:"Hills"},
-                                    {key:"fartlek",   icon:"🎲", label:"Fartlek"},
-                                  ].filter(s => s.key !== session.wtype).map(s => (
-                                    <button key={s.key}
-                                      onClick={() => onDaySlotChange(dayId, s.key)}
-                                      style={{padding:"5px 8px",fontSize:11,fontWeight:600,
-                                        borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                                        background:"white",cursor:"pointer",color:"var(--ink3)"}}>
-                                      {s.icon} {s.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              {/* Swap to a non-workout day type — easy / long / bronies / rest */}
+                              {/* Swap to a non-workout day type — easy / long / bronies / rest.
+                                  (Workout subtype swap is handled by the primary "Swap workout type" UI above.) */}
                               <div>
                                 <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
                                   letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>
@@ -2650,7 +2702,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
             completionMap={completionMap}
             onCompletion={onCompletion}
             onEdit={(dayId, changes) => onEdit && onEdit(week.weekNum, dayId, changes)}
-            onDaySlotChange={(dayId, slot) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot)}/>
+            onDaySlotChange={(dayId, slot, subtype) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot, subtype)}/>
         ))}
         {!week.isRaceWeek && (
           <WeeklyFeedback weekNum={week.weekNum} existing={feedbackMap[week.weekNum]} onSave={onFeedback}/>
@@ -2689,6 +2741,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
 // ─────────────────────────────────────────────────────────────
 const FILTERS = {
   all:      { label:"All",       icon:"📋" },
+  past:     { label:"Past",      icon:"🗓" },
   long:     { label:"Long Runs", icon:"🏔", slot:"long" },
   workout:  { label:"Workouts",  icon:"⚡", slot:"workout" },
   easy:     { label:"Easy Runs", icon:"🦶", slot:"easy" },
@@ -2712,7 +2765,7 @@ function findSessionByWtype(week, wtype) {
   return null;
 }
 
-function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onCompletion }) {
+function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, onCompletion }) {
   const [filter, setFilter] = useState("all");
   if (!plan.length) return (
     <div style={{padding:"48px 16px",textAlign:"center"}}>
@@ -2723,8 +2776,75 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
   const maxKm = Math.max(...plan.map(w => w.totalKm || 0), 1);
   const cfg = FILTERS[filter];
 
+  // Event countdown — days until the goal event. Shown at the top so the goal stays in view.
+  let countdown = null;
+  if (event?.date) {
+    const eventDate = parseLocalDate(event.date);
+    if (eventDate) {
+      const today = new Date(TODAY);
+      today.setHours(0,0,0,0);
+      eventDate.setHours(0,0,0,0);
+      const daysOut = Math.round((eventDate - today) / (1000*60*60*24));
+      const weeksOut = Math.floor(daysOut / 7);
+      const extraDays = daysOut % 7;
+      if (daysOut > 0) {
+        countdown = {
+          daysOut, weeksOut, extraDays,
+          eventName: event.name || `${event.distance || ""} race`,
+          eventDistance: event.distance,
+        };
+      } else if (daysOut === 0) {
+        countdown = { isRaceDay:true, eventName: event.name || "Race day" };
+      } else {
+        countdown = { isPast:true, eventName: event.name || "race", daysAgo:-daysOut };
+      }
+    }
+  }
+
   return (
     <div>
+      {/* Event countdown banner */}
+      {countdown && (
+        <div style={{margin:"12px var(--pad-x) 0",padding:"12px 14px",
+          borderRadius:"var(--r)",border:"2px solid var(--accent)",
+          background:"var(--accent-light)",color:"var(--accent)",
+          display:"flex",alignItems:"center",gap:12}}>
+          {countdown.isRaceDay ? (
+            <>
+              <div style={{fontSize:28}}>🏁</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Race Day</div>
+                <div style={{fontSize:16,fontWeight:800}}>{countdown.eventName} — today is the day</div>
+              </div>
+            </>
+          ) : countdown.isPast ? (
+            <>
+              <div style={{fontSize:28}}>🎉</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Done</div>
+                <div style={{fontSize:14,fontWeight:700}}>{countdown.eventName} was {countdown.daysAgo} day{countdown.daysAgo===1?"":"s"} ago</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{textAlign:"center",minWidth:54}}>
+                <div style={{fontSize:26,fontWeight:800,lineHeight:1,fontFamily:"var(--mono)"}}>{countdown.daysOut}</div>
+                <div style={{fontSize:9,fontWeight:700,letterSpacing:1,textTransform:"uppercase",opacity:.8,marginTop:2}}>day{countdown.daysOut===1?"":"s"} to go</div>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Next event</div>
+                <div style={{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{countdown.eventName}</div>
+                <div style={{fontSize:11,opacity:.85,marginTop:1}}>
+                  {countdown.weeksOut > 0 ? `${countdown.weeksOut} week${countdown.weeksOut===1?"":"s"}` : ""}
+                  {countdown.weeksOut > 0 && countdown.extraDays > 0 ? " · " : ""}
+                  {countdown.extraDays > 0 || countdown.weeksOut === 0 ? `${countdown.extraDays || countdown.daysOut} day${(countdown.extraDays||countdown.daysOut)===1?"":"s"}` : ""}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Volume chart */}
       <div style={{padding:"16px var(--pad-x) 8px"}}>
         <div style={{fontSize:11,fontWeight:600,color:"var(--ink3)",letterSpacing:.8,textTransform:"uppercase",marginBottom:10}}>
@@ -2777,13 +2897,25 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
           const ph     = PHASES[w.phase] || PHASES.BASE;
           const isRace = w.phase === "RACE";
           const fb     = feedbackMap[w.weekNum];
-          const matched = filter === "all" ? null : findSessionByWtype(w, cfg.slot);
-          // When a filter is active, only show weeks that actually contain that session type.
-          // Race week is always shown so the goal stays in view.
-          if (filter !== "all" && !matched && !isRace) return null;
           const wStatus = weekStatus(w.startDate);
           const isCurrent = wStatus === "current";
           const isPast    = wStatus === "past";
+
+          // Past filter: show ONLY past weeks (history view).
+          if (filter === "past") {
+            if (!isPast) return null;
+          } else {
+            // Default and other filters: hide past weeks so the planner focuses on what's
+            // ahead. The "Past" filter is the way to revisit completed history.
+            // Race week always stays visible so the goal remains in view.
+            if (isPast && !isRace) return null;
+            // When a content filter is active, only show weeks that contain that session type.
+            if (filter !== "all") {
+              const matched = findSessionByWtype(w, cfg.slot);
+              if (!matched && !isRace) return null;
+            }
+          }
+          const matched = filter === "all" || filter === "past" ? null : findSessionByWtype(w, cfg.slot);
 
           return (
             <div key={i} onClick={() => onSelectWeek(i)}
@@ -2898,22 +3030,26 @@ function PlanOverview({ plan, onSelectWeek, feedbackMap, completionMap, onComple
                             {w.sessions[d.id].estMins > 0 ? fmtDuration(w.sessions[d.id].estMins) : ""}
                           </span>
                         )}
-                        {/* Yeah/Nup buttons — only past + today */}
+                        {/* Yeah/Nup buttons — no default selection, both visible until user picks */}
                         {eligible && (
                           <div style={{display:"flex",gap:3,flexShrink:0}}
                             onClick={e => e.stopPropagation()}>
                             <button onClick={() => onCompletion(ck, "yeah_broo")}
                               style={{padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",
-                                borderRadius:12,border:`1.5px solid ${cv==="yeah_broo"?"#1a472a":"#ccc"}`,
+                                borderRadius:12,border:`1.5px solid #1a472a`,
                                 background:cv==="yeah_broo"?"#1a472a":"white",
-                                color:cv==="yeah_broo"?"white":"#888",transition:"all .12s"}}>
+                                color:cv==="yeah_broo"?"white":"#1a472a",
+                                opacity: !cv || cv==="yeah_broo" ? 1 : 0.4,
+                                transition:"all .12s"}}>
                               💪
                             </button>
                             <button onClick={() => onCompletion(ck, "nup_soft")}
                               style={{padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",
-                                borderRadius:12,border:`1.5px solid ${cv==="nup_soft"?"#c0392b":"#ccc"}`,
+                                borderRadius:12,border:`1.5px solid #c0392b`,
                                 background:cv==="nup_soft"?"#c0392b":"white",
-                                color:cv==="nup_soft"?"white":"#888",transition:"all .12s"}}>
+                                color:cv==="nup_soft"?"white":"#c0392b",
+                                opacity: !cv || cv==="nup_soft" ? 1 : 0.4,
+                                transition:"all .12s"}}>
                               😬
                             </button>
                           </div>
@@ -5221,7 +5357,21 @@ export default function App() {
 
   // Reusable: pull persisted state from the store (Supabase if logged in, else localStorage)
   async function loadPersistedState() {
-    try { const r = await store.get("bep6_profile"); if (r) { setProfile(JSON.parse(r.value)); setScreen("plan"); } } catch {}
+    try {
+      const r = await store.get("bep6_profile");
+      if (r) {
+        const loaded = JSON.parse(r.value);
+        // Migration: existing profiles from before the planStartDate fix won't have one.
+        // Stamp today as their start so the plan anchors going forward (any sessions before
+        // today simply won't have history — but the plan stops drifting from that point on).
+        if (!loaded.planStartDate) {
+          loaded.planStartDate = todaySydney();
+          try { await store.set("bep6_profile", JSON.stringify(loaded)); } catch {}
+        }
+        setProfile(loaded);
+        setScreen("plan");
+      }
+    } catch {}
     try { const r = await store.get("bep6_event");   if (r) setEvent(JSON.parse(r.value));   } catch {}
     try { const r = await store.get("bep6_fb");      if (r) setFeedbackMap(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_overrides"); if (r) setSessionOverrides(JSON.parse(r.value)); } catch {}
@@ -5283,8 +5433,11 @@ export default function App() {
   function showToast(m) { setToast(m); setTimeout(() => setToast(""), 2500); }
 
   async function handleOnboardingComplete(p, e) {
-    setProfile(p); setEvent(e); setFeedbackMap({});
-    try { await store.set("bep6_profile", JSON.stringify(p)); } catch {}
+    // Stamp the original plan start date if not already set, so weeks anchor to a
+    // fixed point in time and past weeks remain visible as the plan progresses.
+    const withStart = { ...p, planStartDate: p.planStartDate || todaySydney() };
+    setProfile(withStart); setEvent(e); setFeedbackMap({});
+    try { await store.set("bep6_profile", JSON.stringify(withStart)); } catch {}
     if (e) {
       try { await store.set("bep6_event", JSON.stringify(e)); } catch {}
     } else {
@@ -5572,7 +5725,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                <PlanOverview plan={planWithOverrides} onSelectWeek={setSelWeek} feedbackMap={feedbackMap} completionMap={completionMap} onCompletion={handleCompletion}/>
+                <PlanOverview plan={planWithOverrides} event={event} onSelectWeek={setSelWeek} feedbackMap={feedbackMap} completionMap={completionMap} onCompletion={handleCompletion}/>
               </>
             )}
           </div>
