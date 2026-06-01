@@ -525,6 +525,7 @@ const DEMO_SCENARIOS = {
 // ─────────────────────────────────────────────────────────────
 function parseTime(s) {
   if (!s) return null;
+  if (typeof s !== "string") return null;
   const parts = s.trim().split(":").map(Number);
   if (parts.length === 2) return parts[0]*60 + parts[1];
   if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
@@ -600,7 +601,12 @@ function fmtDate(s) {
 // Parse a YYYY-MM-DD string as local midnight (not UTC midnight)
 function parseLocalDate(s) {
   if (!s) return null;
+  // Defensive: if a Date object is passed, return it directly. If anything else
+  // non-string sneaks through, bail out rather than crashing on s.split.
+  if (s instanceof Date) return isNaN(s) ? null : new Date(s);
+  if (typeof s !== "string") return null;
   const [y, m, d] = s.split("-").map(Number);
+  if (!y || !m || !d) return null;
   return new Date(y, m - 1, d, 0, 0, 0, 0);
 }
 
