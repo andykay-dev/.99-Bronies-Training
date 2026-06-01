@@ -4576,6 +4576,7 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
           {[
             {id:"plan",    label:"Plan"},
             {id:"stats",   label:"Stats"},
+            {id:"log",     label:"Log"},
             {id:"event",   label:"Event"},
             {id:"profile", label:"Profile"},
           ].map(t => (
@@ -5079,6 +5080,189 @@ function StatsScreen({ plan, completionMap, feedbackMap, profile, event }) {
         </div>
       </Section>
 
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  TRAINING LOG — read-only history of every completed session
+//  Pulls from bep6_completions + bep6_overrides + planWithOverrides.
+//  Works even when the current plan view is glitched, because completions
+//  are persisted independently of plan regeneration.
+// ─────────────────────────────────────────────────────────────
+function TrainingLog({ plan, completionMap, overrideMap, profile }) {
+  const [filter, setFilter] = useState("all");
+
+  // Build a flat list of every completion stamp, joined with session details where available.
+  // Each entry: { dateStr, dayLabel, weekNum, dayId, session, verdict }
+  const entries = [];
+  if (completionMap) {
+    for (const [key, verdict] of Object.entries(completionMap)) {
+      if (!verdict) continue;
+      const [wnStr, dayId] = key.split(":");
+      const weekNum = parseInt(wnStr, 10);
+      if (!weekNum || !dayId) continue;
+      const week = plan?.find(w => w.weekNum === weekNum);
+      const session = week?.sessions?.[dayId] || null;
+      const startDate = week?.startDate || null;
+      const day = DAYS.find(d => d.id === dayId);
+      const dayIdx = day ? DAYS.indexOf(day) : 0;
+      // Compute actual date for sorting and display
+      let entryDate = null;
+      if (startDate) {
+        const parsed = parseLocalDate(startDate);
+        if (parsed) {
+          parsed.setDate(parsed.getDate() + dayIdx);
+          entryDate = parsed;
+        }
+      }
+      entries.push({
+        key, verdict, weekNum, dayId,
+        dayLabel: day?.label || dayId,
+        session,
+        date: entryDate,
+        dateStr: entryDate ? entryDate.toISOString().slice(0, 10) : null,
+      });
+    }
+  }
+
+  // Sort most recent first. Entries without a date sink to the bottom.
+  entries.sort((a, b) => {
+    if (a.date && b.date) return b.date - a.date;
+    if (a.date) return -1;
+    if (b.date) return 1;
+    return b.weekNum - a.weekNum;
+  });
+
+  // Category helper for filtering
+  function categoryOf(s) {
+    if (!s) return "unknown";
+    if (s.wtype === "long") return "long";
+    if (s.wtype === "easy") return "easy";
+    if (s.wtype === "bronies") return "bronies";
+    if (s.wtype === "rest" && (s.label || "").includes("Strength")) return "strength";
+    if (["intervals","tempo","fartlek","hills","onoff","overunder","ladder","progression"].includes(s.wtype)) return "workout";
+    return "other";
+  }
+
+  const filtered = filter === "all" ? entries : entries.filter(e => categoryOf(e.session) === filter);
+
+  // Stats summary across ALL entries (not filtered)
+  const totalSessions = entries.length;
+  const yeahCount = entries.filter(e => e.verdict === "yeah_broo").length;
+  const totalKm = Math.round(entries.reduce((sum, e) => sum + (e.session?.distance || 0), 0));
+  const yeahRate = totalSessions > 0 ? Math.round((yeahCount / totalSessions) * 100) : 0;
+
+  const LOG_FILTERS = [
+    {id:"all",      label:"All",      icon:"📋"},
+    {id:"long",     label:"Long",     icon:"🏔"},
+    {id:"workout",  label:"Workout",  icon:"⚡"},
+    {id:"easy",     label:"Easy",     icon:"🦶"},
+    {id:"bronies",  label:"BRONIES",  icon:"☕"},
+    {id:"strength", label:"Strength", icon:"🏋"},
+  ];
+
+  function fmtEntryDate(d) {
+    if (!d) return "—";
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${months[d.getMonth()]} ${d.getDate()}`;
+  }
+
+  if (totalSessions === 0) {
+    return (
+      <div style={{padding:"48px 16px",textAlign:"center"}}>
+        <div style={{fontSize:32,marginBottom:8}}>📓</div>
+        <div style={{fontSize:16,fontWeight:600,color:"var(--ink2)"}}>Your training log starts here</div>
+        <div style={{fontSize:13,color:"var(--ink4)",marginTop:8,maxWidth:280,margin:"8px auto"}}>
+          As you mark sessions with "Yeah Broo" or "Nup", they'll show up here as your training history.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Header + stat tiles */}
+      <div style={{padding:"16px var(--pad-x) 8px"}}>
+        <div style={{fontFamily:"var(--display)",fontSize:"clamp(20px,7vw,28px)",letterSpacing:1,marginBottom:10}}>
+          Training Log
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+          <div className="card" style={{padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontFamily:"var(--mono)",fontSize:22,fontWeight:800,color:"var(--ink)"}}>{totalSessions}</div>
+            <div style={{fontSize:9,fontWeight:700,color:"var(--ink4)",letterSpacing:.8,textTransform:"uppercase",marginTop:2}}>Sessions</div>
+          </div>
+          <div className="card" style={{padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontFamily:"var(--mono)",fontSize:22,fontWeight:800,color:"var(--ink)"}}>{totalKm}</div>
+            <div style={{fontSize:9,fontWeight:700,color:"var(--ink4)",letterSpacing:.8,textTransform:"uppercase",marginTop:2}}>km Logged</div>
+          </div>
+          <div className="card" style={{padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontFamily:"var(--mono)",fontSize:22,fontWeight:800,color:"#1a472a"}}>{yeahRate}%</div>
+            <div style={{fontSize:9,fontWeight:700,color:"var(--ink4)",letterSpacing:.8,textTransform:"uppercase",marginTop:2}}>Yeah Broo</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter pills */}
+      <div style={{padding:"0 var(--pad-x) 8px",display:"flex",gap:6,overflowX:"auto"}}>
+        {LOG_FILTERS.map(f => (
+          <button key={f.id} onClick={() => setFilter(f.id)}
+            className={`btn-pill${filter===f.id?" on":""}`} style={{flexShrink:0}}>
+            {f.icon} {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Entry list */}
+      <div style={{padding:"0 var(--pad-x) 24px"}}>
+        {filtered.length === 0 ? (
+          <div style={{padding:"32px 16px",textAlign:"center",fontSize:13,color:"var(--ink4)"}}>
+            No {filter} sessions logged yet.
+          </div>
+        ) : filtered.map(e => {
+          const isYeah = e.verdict === "yeah_broo";
+          const cat = categoryOf(e.session);
+          const catMeta = SLOT_TYPES[cat] || SLOT_TYPES.workout;
+          const stripColor = cat === "strength" ? "#8B0000" : catMeta.color;
+          return (
+            <div key={e.key} className="card" style={{marginBottom:6,overflow:"hidden",display:"flex"}}>
+              <div style={{width:4,flexShrink:0,background:stripColor}}/>
+              <div style={{flex:1,padding:"10px 12px",display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+                <div style={{minWidth:50,textAlign:"center"}}>
+                  <div style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:700,color:"var(--ink)",lineHeight:1}}>
+                    {fmtEntryDate(e.date)}
+                  </div>
+                  <div style={{fontSize:9,color:"var(--ink4)",letterSpacing:.5,textTransform:"uppercase",marginTop:2}}>
+                    {e.dayLabel?.slice(0,3)} · Wk{e.weekNum}
+                  </div>
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"var(--ink)",
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {e.session?.label || "(session details unavailable)"}
+                  </div>
+                  {e.session?.summary && (
+                    <div style={{fontSize:11,color:"var(--ink3)",marginTop:1,
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {e.session.summary}
+                    </div>
+                  )}
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  {e.session?.distance > 0 && (
+                    <div style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:700,color:"var(--ink)"}}>
+                      {e.session.distance}km
+                    </div>
+                  )}
+                  <div style={{fontSize:14,marginTop:1}}>
+                    {isYeah ? "💪" : "😬"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -5672,6 +5856,15 @@ export default function App() {
             feedbackMap={feedbackMap}
             profile={profile}
             event={event}
+          />
+        )}
+
+        {screen === "log" && hasData && (
+          <TrainingLog
+            plan={planWithOverrides}
+            completionMap={completionMap}
+            overrideMap={sessionOverrides}
+            profile={profile}
           />
         )}
 
