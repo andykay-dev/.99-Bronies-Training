@@ -1099,6 +1099,47 @@ function makeW(paces){
 }
 
 // ─────────────────────────────────────────────────────────────
+//  REP-COUNT EDITING — detect editable sessions and rebuild from a rep override
+// ─────────────────────────────────────────────────────────────
+// Detects whether a session label matches one of our editable rep-based formats.
+// Returns { kind, reps, restSec } or null if the session isn't rep-editable.
+// kind tells us which W.* method to call when regenerating.
+function parseEditableSession(session) {
+  if (!session?.label) return null;
+  const lbl = session.label;
+  // Pattern: "N×<thing>" — only match at the very start
+  const m = lbl.match(/^(\d+)×(\d+m\s+Reps|\d+km\s+(?:Reps|Intervals)|1km\s+Intervals|1min\s+Hill\s+Sprints|2min\s+Hill\s+Efforts)/);
+  if (!m) return null;
+  const reps = parseInt(m[1], 10);
+  const tail = m[2];
+  // Map the tail to a kind + default rest
+  if (/^400m/.test(tail))    return { kind:"reps400",     reps, restSec: 75, min:4, max:12, label:"400m reps" };
+  if (/^800m/.test(tail))    return { kind:"reps800",     reps, restSec: 90, min:3, max:10, label:"800m reps" };
+  if (/^1200m/.test(tail))   return { kind:"reps1200",    reps, restSec: 90, min:3, max:8,  label:"1200m reps" };
+  if (/^1km/.test(tail))     return { kind:"intervals",   reps, restSec: 90, min:3, max:8,  label:"1km intervals" };
+  if (/^2km/.test(tail))     return { kind:"reps2k",      reps, restSec:120, min:2, max:5,  label:"2km reps" };
+  if (/Hill\s+Sprints/.test(tail))   return { kind:"hillSprints", reps, restSec: 0, min:4, max:12, label:"hill sprints" };
+  if (/Hill\s+Efforts/.test(tail))   return { kind:"hillRepeats", reps, restSec: 0, min:3, max:10, label:"hill repeats" };
+  return null;
+}
+
+// Regenerate a fresh session object by calling the right W method with new params.
+// Returns the full session including label, summary, detail, distance, estMins, AND garmin steps —
+// so the Garmin export reflects the override correctly.
+function regenerateFromReps(W, kind, reps, restSec) {
+  switch (kind) {
+    case "reps400":     return W.reps400(reps, restSec);
+    case "reps800":     return W.reps800(reps, restSec);
+    case "reps1200":    return W.reps1200(reps, restSec);
+    case "intervals":   return W.intervals(reps, restSec);
+    case "reps2k":      return W.reps2k(reps, restSec);
+    case "hillSprints": return W.hillSprints(reps);
+    case "hillRepeats": return W.hillRepeats(reps);
+    default: return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 //  PHASE-AWARE WORKOUT SELECTOR
 // ─────────────────────────────────────────────────────────────
 
@@ -2157,8 +2198,23 @@ function GarminBlock({ session, paces }) {
       </div>
       <div className="garmin-box">{text}</div>
       {canDownload && paces && (
-        <div style={{fontSize:11,color:"var(--ink4)",marginTop:6,fontStyle:"italic"}}>
-          Download the .json file and import it into Garmin Connect → Workouts → Import Workout
+        <div style={{fontSize:11,color:"var(--ink4)",marginTop:6,lineHeight:1.55}}>
+          <div style={{fontStyle:"italic",marginBottom:4}}>
+            Garmin Connect doesn't natively import JSON files — you need a small browser add-on first.
+          </div>
+          <details style={{cursor:"pointer"}}>
+            <summary style={{fontWeight:600,color:"var(--ink3)",fontSize:11}}>How to upload to Garmin</summary>
+            <ol style={{margin:"6px 0 0 16px",padding:0,fontSize:11,color:"var(--ink3)"}}>
+              <li>Install the Chrome extension <strong>"Share your Garmin Connect workout"</strong> from the Chrome Web Store</li>
+              <li>Open Garmin Connect on web, go to Workouts</li>
+              <li>Click the <strong>Import Workout</strong> button the extension adds, then select the .json file</li>
+              <li>Send the imported workout to your watch via Garmin Connect as usual</li>
+            </ol>
+            <div style={{marginTop:6,fontSize:10,color:"var(--ink4)"}}>
+              No native option exists — Garmin's JSON format is internal, the extension is what bridges it.
+              Alternatively, use "Copy Steps" and build the workout in Garmin Connect manually.
+            </div>
+          </details>
         </div>
       )}
     </div>
@@ -2173,6 +2229,8 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
   const [editing, setEditing]       = useState(false);
   const [draftDist, setDraftDist]   = useState("");
   const [draftNotes, setDraftNotes] = useState("");
+  const [draftReps, setDraftReps]   = useState(null); // rep-count override (null = not editing reps)
+  const editableInfo = parseEditableSession(session);  // null if not rep-editable
   const day = DAYS.find(d => d.id === dayId);
   const slotMeta = SLOT_TYPES[session?.wtype === "intervals" || session?.wtype === "tempo"
     || session?.wtype === "fartlek" || session?.wtype === "hills"
@@ -2203,17 +2261,28 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
   function openEdit() {
     setDraftDist(session.distance > 0 ? String(session.distance) : "");
     setDraftNotes(session.detail || "");
+    setDraftReps(editableInfo ? editableInfo.reps : null);
     setEditing(true);
   }
 
   function saveEdit() {
     const changes = {};
-    const parsedDist = parseFloat(draftDist);
-    if (!isNaN(parsedDist) && parsedDist > 0 && parsedDist !== session.distance) {
-      changes.distance = parsedDist;
-      // Update summary to reflect new distance
-      changes.summary = session.summary?.replace(/[\d.]+km/, `${parsedDist}km`) || session.summary;
+
+    // Rep override path — for rep-editable sessions. Store rep count; planWithOverrides
+    // will regenerate the whole session (label/summary/detail/distance/estMins + garmin)
+    // by calling the right W.* method with the new rep count.
+    if (editableInfo && draftReps !== null && draftReps !== editableInfo.reps) {
+      const clamped = Math.max(editableInfo.min, Math.min(editableInfo.max, draftReps));
+      changes.repOverride = { kind: editableInfo.kind, reps: clamped, restSec: editableInfo.restSec };
+    } else {
+      // Non-rep distance edit (long runs, easy runs, etc.) — patches distance field only.
+      const parsedDist = parseFloat(draftDist);
+      if (!editableInfo && !isNaN(parsedDist) && parsedDist > 0 && parsedDist !== session.distance) {
+        changes.distance = parsedDist;
+        changes.summary = session.summary?.replace(/[\d.]+km/, `${parsedDist}km`) || session.summary;
+      }
     }
+
     if (draftNotes !== session.detail) {
       changes.detail = draftNotes;
     }
@@ -2555,8 +2624,42 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                 </>
               ) : (!isRest && editing ? (
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {/* Distance editor — only shown when the session has a distance */}
-                  {session.distance > 0 && (
+                  {/* Rep-count editor — for rep-based workouts (intervals/hills) */}
+                  {editableInfo ? (
+                    <div>
+                      <label className="lbl">Reps — {editableInfo.label}</label>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
+                        <button
+                          onClick={() => setDraftReps(r => Math.max(editableInfo.min, (r ?? editableInfo.reps) - 1))}
+                          disabled={(draftReps ?? editableInfo.reps) <= editableInfo.min}
+                          style={{width:38,height:38,fontSize:18,fontWeight:700,
+                            border:"2px solid var(--rule)",borderRadius:"var(--r)",
+                            background:"white",cursor:(draftReps ?? editableInfo.reps) <= editableInfo.min ? "not-allowed" : "pointer",
+                            color:"var(--ink)",opacity:(draftReps ?? editableInfo.reps) <= editableInfo.min ? 0.4 : 1}}>
+                          −
+                        </button>
+                        <div style={{fontFamily:"var(--mono)",fontSize:26,fontWeight:800,
+                          minWidth:54,textAlign:"center",color:"var(--ink)"}}>
+                          {draftReps ?? editableInfo.reps}
+                        </div>
+                        <button
+                          onClick={() => setDraftReps(r => Math.min(editableInfo.max, (r ?? editableInfo.reps) + 1))}
+                          disabled={(draftReps ?? editableInfo.reps) >= editableInfo.max}
+                          style={{width:38,height:38,fontSize:18,fontWeight:700,
+                            border:"2px solid var(--rule)",borderRadius:"var(--r)",
+                            background:"white",cursor:(draftReps ?? editableInfo.reps) >= editableInfo.max ? "not-allowed" : "pointer",
+                            color:"var(--ink)",opacity:(draftReps ?? editableInfo.reps) >= editableInfo.max ? 0.4 : 1}}>
+                          +
+                        </button>
+                        <div style={{fontSize:11,color:"var(--ink4)",flex:1,lineHeight:1.4}}>
+                          Range {editableInfo.min}–{editableInfo.max}.
+                          {(draftReps !== null && draftReps !== editableInfo.reps)
+                            ? ` Distance, time, and Garmin steps will rebuild.`
+                            : ""}
+                        </div>
+                      </div>
+                    </div>
+                  ) : session.distance > 0 ? (
                     <div>
                       <label className="lbl">Distance (km)</label>
                       <input
@@ -2573,7 +2676,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                           : "Enter the distance you actually want to run"}
                       </div>
                     </div>
-                  )}
+                  ) : null}
                   <div>
                     <label className="lbl">Personal notes (optional)</label>
                     <textarea
@@ -5763,11 +5866,20 @@ export default function App() {
       });
     });
 
-    // Then apply per-session field edits (distance, notes) on top
+    // Then apply per-session field edits (distance, notes, repOverride) on top.
     Object.entries(weekSessionOverrides).forEach(([dayId, overrides]) => {
-      if (sessions[dayId]) {
-        sessions[dayId] = { ...sessions[dayId], ...overrides };
+      if (!sessions[dayId]) return;
+      let s = sessions[dayId];
+      // Rep override regenerates the whole session (label/summary/detail/distance/estMins + garmin)
+      // by calling the matching W.* method. This is what makes Edit actually rebuild the workout.
+      if (overrides.repOverride) {
+        const { kind, reps, restSec } = overrides.repOverride;
+        const rebuilt = regenerateFromReps(W, kind, reps, restSec);
+        if (rebuilt) s = rebuilt;
       }
+      // Layer any other field-level overrides (notes, distance for non-rep sessions) on top
+      const { repOverride, ...fieldOverrides } = overrides;
+      sessions[dayId] = { ...s, ...fieldOverrides };
     });
 
     // Recalculate totalKm after all overrides
