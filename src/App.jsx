@@ -30,6 +30,76 @@ import {
   FUEL_LOOKUP, DEFAULT_STRATEGY, DEFAULT_LEG,
   parseAidStations, parseBulkCheckpoints,
 } from "@bronies/race-engine";
+
+import {
+  processScan,
+  SCAN_INTENTS,
+} from "@bronies/scanner-engine";
+
+// ─────────────────────────────────────────────────────────────
+//  useScan — reusable hook for the /api/scan serverless function
+//
+//  const { scan, result, scanning, error, clear } = useScan();
+//  scan(url, intent)  → fires the request
+//  result             → ScanResult | null
+//  scanning           → boolean
+//  error              → string | null
+//  clear()            → resets to initial state
+//
+//  In local dev (localhost) the hook skips the API call and
+//  returns a helpful message so dev works without Vercel.
+// ─────────────────────────────────────────────────────────────
+function useScan() {
+  const [result,   setResult]   = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [error,    setError]    = useState(null);
+
+  async function scan(url, intent = SCAN_INTENTS.GENERAL) {
+    if (!url) return;
+    setScanning(true);
+    setResult(null);
+    setError(null);
+
+    // In local dev without Vercel CLI, /api/scan won't exist.
+    // Detect this and give a clear message rather than a cryptic 404.
+    const isLocalDev = window.location.hostname === "localhost"
+                    || window.location.hostname === "127.0.0.1";
+
+    try {
+      const resp = await fetch("/api/scan", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ url, intent }),
+      });
+
+      // If we're local and got a 404, the function isn't running
+      if (resp.status === 404 && isLocalDev) {
+        setError("Scanner API not available in local dev. Deploy to Vercel or run `vercel dev` to test.");
+        return;
+      }
+
+      const json = await resp.json();
+      const scanResult = processScan(json);
+      setResult(scanResult);
+      if (scanResult.error) setError(scanResult.error);
+    } catch (err) {
+      setError(isLocalDev
+        ? "Scanner requires deployment. Use the paste import instead during local dev."
+        : `Network error: ${err.message}`
+      );
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  function clear() {
+    setResult(null);
+    setError(null);
+    setScanning(false);
+  }
+
+  return { scan, result, scanning, error, clear };
+}
 import { useForm } from "@formspree/react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -2255,7 +2325,7 @@ const store = {
   async migrateLocalToSupabase() {
     const uid = await getUid();
     if (!uid) return;
-    const keys = ["bep6_profile","bep6_event","bep6_fb","bep6_overrides","bep6_slots","bep6_completions","bep6_skin","bep6_racePlan"];
+    const keys = ["bep6_profile","bep6_event","bep6_fb","bep6_overrides","bep6_slots","bep6_completions","bep6_skin","bep6_racePlan","bep6_nutritionLib"];
     for (const key of keys) {
       try {
         const raw = localStorage.getItem(`${APP_ID}:${key}`);
@@ -3597,12 +3667,125 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 //  UI: Header
 // ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
+//  NUTRITION SCANNER
+//  Inline URL scanner for product nutrition pages.
+//  Scans a URL, extracts carbs, lets user confirm then add to inventory.
+// ─────────────────────────────────────────────────────────────
+function NutritionScanner({ onAdd }) {
+  const { scan, result, scanning, error, clear } = useScan();
+  const [url,      setUrl]      = useState("");
+  const [nameEdit, setNameEdit] = useState("");
+  const [carbEdit, setCarbEdit] = useState("");
+  const [open,     setOpen]     = useState(false);
+
+  const nutrition = result?.data;
+  const hasResult = result && result.intent === SCAN_INTENTS.NUTRITION;
+
+  useEffect(() => {
+    if (!nutrition) return;
+    if (nutrition.productName) setNameEdit(nutrition.productName);
+    if (nutrition.carbsG != null) setCarbEdit(String(Math.round(nutrition.carbsG)));
+  }, [nutrition]);
+
+  function handleScan() {
+    if (!url.trim()) return;
+    scan(url, SCAN_INTENTS.NUTRITION);
+  }
+
+  function handleAdd() {
+    const carbs = parseInt(carbEdit, 10);
+    if (!nameEdit.trim() || !carbs || carbs <= 0) return;
+    onAdd(nameEdit.trim(), carbs, nutrition?.sodiumMg ?? null);
+    setUrl(""); setNameEdit(""); setCarbEdit("");
+    clear(); setOpen(false);
+  }
+
+  return (
+    <div className="card" style={{ padding:14, marginBottom:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:13, fontWeight:700, color:"var(--ink)" }}>🔍 Scan product page</div>
+          <div style={{ fontSize:11, color:"var(--ink3)", marginTop:2 }}>
+            Paste a product URL to auto-fill nutrition info
+          </div>
+        </div>
+        <button className="btn btn-g btn-sm"
+          onClick={() => { setOpen(v => !v); clear(); }}>
+          {open ? "Cancel" : "Scan ↓"}
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ marginTop:12 }}>
+          <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+            <input className="inp" style={{ flex:1 }}
+              placeholder="https://maurten.com/products/gel-100"
+              value={url}
+              onChange={e => { setUrl(e.target.value); clear(); }} />
+            <button className="btn btn-p btn-sm"
+              style={{ flexShrink:0, whiteSpace:"nowrap" }}
+              disabled={!url.trim() || scanning}
+              onClick={handleScan}>
+              {scanning ? "…" : "Scan"}
+            </button>
+          </div>
+
+          {error && (
+            <div style={{ fontSize:11, color:"var(--warn)", marginBottom:8 }}>⚠ {error}</div>
+          )}
+
+          {result?.warnings?.map((w, i) => (
+            <div key={i} style={{ fontSize:11, color:"var(--gold-dark)", marginBottom:4 }}>• {w}</div>
+          ))}
+
+          {hasResult && (
+            <div style={{ background:"var(--bg)", border:"1px solid var(--rule)",
+              borderRadius:"var(--r)", padding:12, marginBottom:8 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)",
+                textTransform:"uppercase", letterSpacing:.8, marginBottom:8 }}>
+                Confirm & Add
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8,
+                alignItems:"flex-end", marginBottom:10 }}>
+                <div>
+                  <label className="lbl">Product name</label>
+                  <input className="inp" value={nameEdit}
+                    onChange={e => setNameEdit(e.target.value)} />
+                </div>
+                <div>
+                  <label className="lbl">Carbs (g)</label>
+                  <input className="inp" type="number" min="1" style={{ width:72 }}
+                    value={carbEdit}
+                    onChange={e => setCarbEdit(e.target.value)} />
+                </div>
+              </div>
+              {nutrition.sodiumMg && (
+                <div style={{ fontSize:11, color:"var(--ink3)", marginBottom:6 }}>
+                  Sodium: {Math.round(nutrition.sodiumMg)}mg
+                  {nutrition.potassiumMg ? ` · Potassium: ${Math.round(nutrition.potassiumMg)}mg` : ""}
+                  {nutrition.basis !== "unknown" ? ` · ${nutrition.basis === "per_serve" ? "Per serve" : "Per 100g"}` : ""}
+                </div>
+              )}
+              <button className="btn btn-p" style={{ width:"100%" }}
+                disabled={!nameEdit.trim() || !carbEdit}
+                onClick={handleAdd}>
+                + Add to vest inventory
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 //  RACE DAY SCREEN
 //  Session 2: Course setup + fuel inventory (input half).
 //  Session 3 will add the plan output section below the inputs.
 // ─────────────────────────────────────────────────────────────
 
-function RaceDayScreen({ racePlan, onChange }) {
+function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAdd, onNutritionLibRemove }) {
   const { race = { title:"", date:"", legs:[] }, strategy = DEFAULT_STRATEGY } = racePlan || {};
 
   // ── helpers ──────────────────────────────────────────────
@@ -3635,29 +3818,63 @@ function RaceDayScreen({ racePlan, onChange }) {
   }
 
   // ── fuel inventory CRUD ──────────────────────────────────
-  const [fuelPreset,   setFuelPreset]   = useState("");
+  const [fuelSearch,   setFuelSearch]   = useState("");
   const [customName,   setCustomName]   = useState("");
   const [customCarbs,  setCustomCarbs]  = useState("");
+  const [showManageLib, setShowManageLib] = useState(false);
 
-  function addPreset() {
-    if (!fuelPreset) return;
-    const carbs = FUEL_LOOKUP[fuelPreset];
-    if (!carbs) return;
-    const inv = [...(strategy.fuelInventory || []), { name: fuelPreset, carbs }];
+  // Merge built-in presets + personal library into one unified list for the picker.
+  // Library items override built-ins of the same name (user may have better data).
+  const builtinItems  = Object.entries(FUEL_LOOKUP).map(([name, carbs]) => ({ name, carbs, source:"builtin" }));
+  const libNames      = new Set(nutritionLib.map(i => i.name.toLowerCase()));
+  const mergedOptions = [
+    ...nutritionLib,
+    ...builtinItems.filter(i => !libNames.has(i.name.toLowerCase())),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+
+  const searchLower   = fuelSearch.toLowerCase();
+  const filteredOptions = searchLower
+    ? mergedOptions.filter(i => i.name.toLowerCase().includes(searchLower))
+    : mergedOptions;
+
+  function addFromLibrary(item) {
+    // Don't add duplicates to the vest for this race
+    if ((strategy.fuelInventory || []).some(i => i.name === item.name)) return;
+    const inv = [...(strategy.fuelInventory || []), { name: item.name, carbs: item.carbs }];
     updateStrategy({ fuelInventory: inv });
-    setFuelPreset("");
+    setFuelSearch("");
   }
+
   function addCustom() {
     const c = parseInt(customCarbs, 10);
     if (!customName.trim() || !c || c <= 0) return;
-    const inv = [...(strategy.fuelInventory || []), { name: customName.trim(), carbs: c }];
+    const item = { name: customName.trim(), carbs: c };
+    // Add to vest
+    const inv = [...(strategy.fuelInventory || []), item];
     updateStrategy({ fuelInventory: inv });
+    // Save to personal library
+    if (onNutritionLibAdd) onNutritionLibAdd(item.name, item.carbs, null, "custom");
     setCustomName(""); setCustomCarbs("");
   }
+
   function removeFuel(i) {
     const inv = (strategy.fuelInventory || []).filter((_, idx) => idx !== i);
     updateStrategy({ fuelInventory: inv });
   }
+
+  // ── scanner ───────────────────────────────────────────────
+  const { scan, result: scanResult, scanning, error: scanError, clear: clearScan } = useScan();
+  const [scanUrl, setScanUrl] = useState("");
+
+  // When a scan completes with race data, apply it
+  useEffect(() => {
+    if (!scanResult || scanResult.intent !== SCAN_INTENTS.RACE_AID_STATIONS) return;
+    if (scanResult.data?.legs?.length > 0) {
+      updateRace({ legs: scanResult.data.legs });
+      setScanUrl("");
+      setImportMode(null);
+    }
+  }, [scanResult]);
 
   // ── paste importer ────────────────────────────────────────
   const [importMode, setImportMode]   = useState(null); // null | "structured" | "bulk"
@@ -3725,21 +3942,59 @@ function RaceDayScreen({ racePlan, onChange }) {
 
         {/* Mode picker — shown when no mode is active */}
         {!importMode && (
-          <div style={{ display:"flex", gap:8 }}>
-            <button className="btn btn-o" style={{ flex:1, textAlign:"left", padding:"10px 12px" }}
-              onClick={() => setImportMode("structured")}>
-              <div style={{ fontWeight:700, fontSize:12 }}>📋 Paste race guide</div>
-              <div style={{ fontSize:10, color:"var(--ink3)", marginTop:2, fontWeight:400 }}>
-                Full aid station tables from the race website
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {/* URL scanner */}
+            <div style={{ display:"flex", gap:8 }}>
+              <input className="inp" style={{ flex:1 }}
+                placeholder="https://racewebsite.com/course-info"
+                value={scanUrl}
+                onChange={e => { setScanUrl(e.target.value); clearScan(); }} />
+              <button className="btn btn-p btn-sm"
+                style={{ flexShrink:0, whiteSpace:"nowrap" }}
+                disabled={!scanUrl.trim() || scanning}
+                onClick={() => scan(scanUrl, SCAN_INTENTS.RACE_AID_STATIONS)}>
+                {scanning ? "Scanning…" : "🔍 Scan"}
+              </button>
+            </div>
+            {scanError && (
+              <div style={{ fontSize:11, color:"var(--warn)", padding:"6px 10px",
+                background:"#fff0f0", border:"1px solid var(--warn)",
+                borderRadius:"var(--r)" }}>
+                ⚠ {scanError}
+                {scanResult?.rawText && (
+                  <span> — <button style={{ background:"none", border:"none",
+                    color:"var(--accent)", cursor:"pointer", fontSize:11,
+                    textDecoration:"underline", padding:0 }}
+                    onClick={() => { setPasteText(scanResult.rawText); setImportMode("structured"); clearScan(); }}>
+                    paste the raw text instead
+                  </button></span>
+                )}
               </div>
-            </button>
-            <button className="btn btn-o" style={{ flex:1, textAlign:"left", padding:"10px 12px" }}
-              onClick={() => setImportMode("bulk")}>
-              <div style={{ fontWeight:700, fontSize:12 }}>📝 Quick list</div>
-              <div style={{ fontSize:10, color:"var(--ink3)", marginTop:2, fontWeight:400 }}>
-                One checkpoint per line, any format
+            )}
+            {scanResult?.warnings?.length > 0 && (
+              <div style={{ fontSize:11, color:"var(--gold-dark)", lineHeight:1.5 }}>
+                {scanResult.warnings.map((w, i) => <div key={i}>• {w}</div>)}
               </div>
-            </button>
+            )}
+            <div style={{ fontSize:10, color:"var(--ink4)" }}>
+              Or paste manually:
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button className="btn btn-o" style={{ flex:1, textAlign:"left", padding:"10px 12px" }}
+                onClick={() => setImportMode("structured")}>
+                <div style={{ fontWeight:700, fontSize:12 }}>📋 Paste race guide</div>
+                <div style={{ fontSize:10, color:"var(--ink3)", marginTop:2, fontWeight:400 }}>
+                  Full aid station tables from the race website
+                </div>
+              </button>
+              <button className="btn btn-o" style={{ flex:1, textAlign:"left", padding:"10px 12px" }}
+                onClick={() => setImportMode("bulk")}>
+                <div style={{ fontWeight:700, fontSize:12 }}>📝 Quick list</div>
+                <div style={{ fontSize:10, color:"var(--ink3)", marginTop:2, fontWeight:400 }}>
+                  One checkpoint per line, any format
+                </div>
+              </button>
+            </div>
           </div>
         )}
 
@@ -3935,12 +4190,21 @@ function RaceDayScreen({ racePlan, onChange }) {
         What's going in the vest. Mix and match — the plan uses the average carbs per item.
       </div>
 
-      {/* Current inventory list */}
+      {/* Nutrition scanner */}
+      <NutritionScanner onAdd={(name, carbs, sodiumMg) => {
+        // Add to vest for this race
+        const inv = [...(strategy.fuelInventory || []), { name, carbs }];
+        updateStrategy({ fuelInventory: inv });
+        // Save to personal library
+        if (onNutritionLibAdd) onNutritionLibAdd(name, carbs, sodiumMg, "scanned");
+      }} />
+
+      {/* Current vest inventory */}
       {(strategy.fuelInventory || []).length === 0 && (
         <div style={{ fontSize:13, color:"var(--ink4)", fontStyle:"italic",
           marginBottom:12, padding:"12px var(--pad-x)", background:"var(--bg)",
           borderRadius:"var(--r)", border:"1px dashed var(--rule)" }}>
-          No fuel added yet — add from presets or enter a custom item.
+          No fuel added yet — search your library or add a custom item below.
         </div>
       )}
       {(strategy.fuelInventory || []).map((item, i) => (
@@ -3959,26 +4223,105 @@ function RaceDayScreen({ racePlan, onChange }) {
         </div>
       ))}
 
-      {/* Add from preset */}
+      {/* ── Unified library picker ────────────────────────────── */}
       <div className="card" style={{ padding:14, marginBottom:8 }}>
-        <label className="lbl">Add from presets</label>
-        <div style={{ display:"flex", gap:8 }}>
-          <select className="sel" value={fuelPreset} onChange={e => setFuelPreset(e.target.value)}>
-            <option value="">— Choose item —</option>
-            {PRESET_OPTIONS.map(name => (
-              <option key={name} value={name}>{name} ({FUEL_LOOKUP[name]}g)</option>
-            ))}
-          </select>
-          <button className="btn btn-p btn-sm" onClick={addPreset}
-            style={{ flexShrink:0, whiteSpace:"nowrap" }}>
-            Add
-          </button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+          marginBottom:8 }}>
+          <label className="lbl" style={{ margin:0 }}>Add from your library</label>
+          {nutritionLib.length > 0 && (
+            <button className="btn btn-g btn-sm"
+              onClick={() => setShowManageLib(v => !v)}>
+              {showManageLib ? "Done" : `Manage (${nutritionLib.length})`}
+            </button>
+          )}
         </div>
+
+        {/* Manage library mode */}
+        {showManageLib ? (
+          <div>
+            <div style={{ fontSize:11, color:"var(--ink3)", marginBottom:8 }}>
+              Your saved items — tap ✕ to remove from library. This won't affect plans already built.
+            </div>
+            {nutritionLib.map((item, i) => (
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:8,
+                padding:"8px 10px", border:"1px solid var(--rule)",
+                borderRadius:"var(--r)", marginBottom:5, background:"var(--bg)" }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:"var(--ink)" }}>{item.name}</div>
+                  <div style={{ fontSize:10, color:"var(--ink3)", fontFamily:"var(--mono)" }}>
+                    {item.carbs}g carbs
+                    {item.sodiumMg ? ` · ${Math.round(item.sodiumMg)}mg sodium` : ""}
+                    <span style={{ marginLeft:6, color:"var(--ink4)" }}>
+                      {item.source === "scanned" ? "🔍 scanned" : item.source === "custom" ? "✏ custom" : ""}
+                    </span>
+                  </div>
+                </div>
+                <button className="btn btn-g btn-sm"
+                  onClick={() => onNutritionLibRemove && onNutritionLibRemove(item.name)}
+                  style={{ color:"var(--warn)" }}>✕</button>
+              </div>
+            ))}
+            {nutritionLib.length === 0 && (
+              <div style={{ fontSize:12, color:"var(--ink4)", fontStyle:"italic" }}>
+                Your library is empty — items you add or scan appear here.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            {/* Search input */}
+            <input className="inp" style={{ marginBottom:8 }}
+              placeholder={`Search ${mergedOptions.length} items…`}
+              value={fuelSearch}
+              onChange={e => setFuelSearch(e.target.value)} />
+
+            {/* Filtered results */}
+            <div style={{ maxHeight:200, overflowY:"auto", display:"flex",
+              flexDirection:"column", gap:5 }}>
+              {filteredOptions.length === 0 && (
+                <div style={{ fontSize:12, color:"var(--ink4)", fontStyle:"italic", padding:8 }}>
+                  No items match "{fuelSearch}"
+                </div>
+              )}
+              {filteredOptions.map((item, i) => {
+                const alreadyAdded = (strategy.fuelInventory || []).some(f => f.name === item.name);
+                return (
+                  <button key={i}
+                    onClick={() => !alreadyAdded && addFromLibrary(item)}
+                    style={{ display:"flex", alignItems:"center", gap:10,
+                      padding:"8px 10px", borderRadius:"var(--r)",
+                      border:"1px solid var(--rule)",
+                      background: alreadyAdded ? "var(--bg)" : "var(--white)",
+                      cursor: alreadyAdded ? "default" : "pointer",
+                      opacity: alreadyAdded ? 0.5 : 1,
+                      textAlign:"left", width:"100%" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:12, fontWeight:600, color:"var(--ink)" }}>
+                        {item.name}
+                      </div>
+                      <div style={{ fontSize:10, color:"var(--ink3)", fontFamily:"var(--mono)" }}>
+                        {item.carbs}g carbs
+                        {item.source === "scanned" ? " · 🔍" : item.source === "custom" ? " · ✏" : ""}
+                      </div>
+                    </div>
+                    <div style={{ fontSize:11, color: alreadyAdded ? "var(--ink4)" : "var(--accent)",
+                      fontWeight:700, flexShrink:0 }}>
+                      {alreadyAdded ? "added" : "+ Add"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Add custom item */}
+      {/* ── Add custom item (also saves to library) ───────────── */}
       <div className="card" style={{ padding:14, marginBottom:24 }}>
-        <label className="lbl">Custom item</label>
+        <label className="lbl">New custom item</label>
+        <div style={{ fontSize:11, color:"var(--ink3)", marginBottom:8 }}>
+          Saved to your library for future races
+        </div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr auto auto", gap:8, alignItems:"flex-end" }}>
           <div>
             <label className="lbl" style={{ marginBottom:4 }}>Name</label>
@@ -4001,7 +4344,7 @@ function RaceDayScreen({ racePlan, onChange }) {
       </div>
 
       {/* ══ SECTION 3: Race Plan Output ══════════════════════ */}
-      <RacePlanOutput race={race} strategy={strategy} validLegs={validLegs} />
+      <RacePlanOutput race={race} strategy={strategy} validLegs={validLegs} onChange={onChange} racePlan={racePlan} />
 
     </div>
   );
@@ -4012,11 +4355,24 @@ function RaceDayScreen({ racePlan, onChange }) {
 //  Calls generateRacePlan and renders results. Pure display —
 //  no state of its own beyond what the engine returns.
 // ─────────────────────────────────────────────────────────────
-function RacePlanOutput({ race, strategy, validLegs }) {
+function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
   if (validLegs.length === 0 || !strategy.targetHours) return null;
 
   const plan = generateRacePlan(race, strategy);
   if (!plan) return null;
+
+  // Gear checked state — stored as an array of checked item strings in race.gearChecked
+  const checkedSet = new Set(race.gearChecked || []);
+
+  function toggleGear(item) {
+    const next = new Set(checkedSet);
+    if (next.has(item)) next.delete(item); else next.add(item);
+    onChange({ ...racePlan, race: { ...race, gearChecked: [...next] } });
+  }
+
+  function clearGear() {
+    onChange({ ...racePlan, race: { ...race, gearChecked: [] } });
+  }
 
   // Format legMins as "1h 7min" or "45min"
   function fmtLegTime(mins) {
@@ -4196,9 +4552,19 @@ function RacePlanOutput({ race, strategy, validLegs }) {
       </div>
 
       {/* ── Gear checklist ──────────────────────────────────── */}
-      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
-        textTransform:"uppercase", marginBottom:8 }}>
-        Gear Checklist
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+        marginBottom:8 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+          textTransform:"uppercase" }}>
+          Gear Checklist
+        </div>
+        {checkedSet.size > 0 && (
+          <button onClick={clearGear}
+            style={{ fontSize:10, color:"var(--ink4)", background:"none", border:"none",
+              cursor:"pointer", padding:"2px 6px", textDecoration:"underline" }}>
+            Clear all
+          </button>
+        )}
       </div>
 
       {/* Group by status: critical first, then required, then optional */}
@@ -4212,16 +4578,41 @@ function RacePlanOutput({ race, strategy, validLegs }) {
               textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>
               {cfg.label}
             </div>
-            {items.map((g, i) => (
-              <div key={i} style={{ display:"flex", alignItems:"center", gap:10,
-                padding:"9px 12px", background:cfg.bg,
-                border:`1px solid ${cfg.border}`,
-                borderRadius:"var(--r)", marginBottom:5 }}>
-                <div style={{ width:16, height:16, border:`2px solid ${cfg.border}`,
-                  borderRadius:3, flexShrink:0, background:"var(--white)" }} />
-                <div style={{ fontSize:13, color:"var(--ink)", flex:1 }}>{g.item}</div>
-              </div>
-            ))}
+            {items.map((g, i) => {
+              const checked = checkedSet.has(g.item);
+              return (
+                <div key={i}
+                  onClick={() => toggleGear(g.item)}
+                  style={{ display:"flex", alignItems:"center", gap:10,
+                    padding:"9px 12px",
+                    background: checked ? "var(--bg)" : cfg.bg,
+                    border:`1px solid ${checked ? "var(--rule)" : cfg.border}`,
+                    borderRadius:"var(--r)", marginBottom:5,
+                    cursor:"pointer", userSelect:"none",
+                    opacity: checked ? 0.5 : 1,
+                    transition:"all .15s" }}>
+                  {/* Checkbox */}
+                  <div style={{
+                    width:18, height:18, flexShrink:0, borderRadius:3,
+                    border:`2px solid ${checked ? "var(--ink3)" : cfg.border}`,
+                    background: checked ? "var(--ink)" : "var(--white)",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    transition:"all .15s" }}>
+                    {checked && (
+                      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                        <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="2"
+                          strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </div>
+                  <div style={{ fontSize:13, color: checked ? "var(--ink4)" : "var(--ink)",
+                    flex:1, textDecoration: checked ? "line-through" : "none",
+                    transition:"all .15s" }}>
+                    {g.item}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })}
@@ -5255,6 +5646,7 @@ export default function App() {
   const [feedbackOpen,     setFeedbackOpen]     = useState(false); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
   const [skin,           setSkinState]      = useState("default"); // "default" | "8bit"
   const [racePlan,       setRacePlanState]  = useState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
+  const [nutritionLib,   setNutritionLib]   = useState([]); // persisted personal nutrition library
 
   // Apply skin to <body data-skin="..."> and persist choice
   async function setSkin(s) {
@@ -5317,7 +5709,8 @@ export default function App() {
     try { const r = await store.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
-    try { const r = await store.get("bep6_racePlan");  if (r) setRacePlanState(JSON.parse(r.value)); } catch {}
+    try { const r = await store.get("bep6_racePlan");      if (r) setRacePlanState(JSON.parse(r.value)); } catch {}
+    try { const r = await store.get("bep6_nutritionLib");  if (r) setNutritionLib(JSON.parse(r.value)); } catch {}
   }
 
   // Called when the user successfully signs in via the optional overlay.
@@ -5451,6 +5844,34 @@ export default function App() {
   function handleRacePlanUpdate(next) {
     setRacePlanState(next);
     try { store.set("bep6_racePlan", JSON.stringify(next)); } catch {}
+  }
+
+  // Add an item to the personal nutrition library.
+  // source: "custom" | "scanned"
+  // Deduplicates by name — updates carbs if name already exists.
+  function handleNutritionLibAdd(name, carbs, sodiumMg = null, source = "custom") {
+    setNutritionLib(prev => {
+      const existing = prev.findIndex(i => i.name.toLowerCase() === name.toLowerCase());
+      let next;
+      if (existing >= 0) {
+        // Update in place — user may have rescanned with better data
+        next = prev.map((item, idx) =>
+          idx === existing ? { ...item, carbs, sodiumMg, source } : item
+        );
+      } else {
+        next = [...prev, { name, carbs, sodiumMg, source }];
+      }
+      try { store.set("bep6_nutritionLib", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  function handleNutritionLibRemove(name) {
+    setNutritionLib(prev => {
+      const next = prev.filter(i => i.name !== name);
+      try { store.set("bep6_nutritionLib", JSON.stringify(next)); } catch {}
+      return next;
+    });
   }
 
   // Save a manual edit to a single session (distance, notes, label).
@@ -5858,6 +6279,9 @@ export default function App() {
           <RaceDayScreen
             racePlan={racePlan}
             onChange={handleRacePlanUpdate}
+            nutritionLib={nutritionLib}
+            onNutritionLibAdd={handleNutritionLibAdd}
+            onNutritionLibRemove={handleNutritionLibRemove}
           />
         )}
 
