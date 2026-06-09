@@ -28,6 +28,7 @@ import {
 import {
   generateRacePlan,
   FUEL_LOOKUP, DEFAULT_STRATEGY, DEFAULT_LEG,
+  parseAidStations, parseBulkCheckpoints,
 } from "@bronies/race-engine";
 import { useForm } from "@formspree/react";
 import { createClient } from "@supabase/supabase-js";
@@ -2254,7 +2255,7 @@ const store = {
   async migrateLocalToSupabase() {
     const uid = await getUid();
     if (!uid) return;
-    const keys = ["bep6_profile","bep6_event","bep6_fb","bep6_overrides","bep6_slots","bep6_completions","bep6_skin"];
+    const keys = ["bep6_profile","bep6_event","bep6_fb","bep6_overrides","bep6_slots","bep6_completions","bep6_skin","bep6_racePlan"];
     for (const key of keys) {
       try {
         const raw = localStorage.getItem(`${APP_ID}:${key}`);
@@ -3658,7 +3659,30 @@ function RaceDayScreen({ racePlan, onChange }) {
     updateStrategy({ fuelInventory: inv });
   }
 
-  // ── derived totals ────────────────────────────────────────
+  // ── paste importer ────────────────────────────────────────
+  const [importMode, setImportMode]   = useState(null); // null | "structured" | "bulk"
+  const [pasteText, setPasteText]     = useState("");
+  const [parseErrors, setParseErrors] = useState([]);
+
+  function handleImport() {
+    const result = importMode === "structured"
+      ? parseAidStations(pasteText)
+      : parseBulkCheckpoints(pasteText);
+    if (result.legs.length === 0) {
+      setParseErrors(result.errors.length ? result.errors : ["No checkpoints found — check the format."]);
+      return;
+    }
+    updateRace({ legs: result.legs });
+    setPasteText("");
+    setImportMode(null);
+    setParseErrors([]);
+  }
+
+  function closeImport() {
+    setImportMode(null);
+    setPasteText("");
+    setParseErrors([]);
+  }
   const validLegs    = (race.legs || []).filter(l => l.km > 0);
   const totalDistKm  = validLegs.reduce((a, l) => a + (parseFloat(l.km) || 0), 0);
   const totalAscentM = validLegs.reduce((a, l) => a + (parseInt(l.gainM, 10) || 0), 0);
@@ -3690,7 +3714,81 @@ function RaceDayScreen({ racePlan, onChange }) {
         Course Setup
       </div>
 
-      {/* Event title + date + weather in a card */}
+      {/* ── Import checkpoints ───────────────────────────────── */}
+      <div className="card" style={{ padding:14, marginBottom:12 }}>
+        <div style={{ fontSize:13, fontWeight:700, color:"var(--ink)", marginBottom:4 }}>
+          Import checkpoints
+        </div>
+        <div style={{ fontSize:11, color:"var(--ink3)", marginBottom:12 }}>
+          Add all at once from your race guide, or one by one below.
+        </div>
+
+        {/* Mode picker — shown when no mode is active */}
+        {!importMode && (
+          <div style={{ display:"flex", gap:8 }}>
+            <button className="btn btn-o" style={{ flex:1, textAlign:"left", padding:"10px 12px" }}
+              onClick={() => setImportMode("structured")}>
+              <div style={{ fontWeight:700, fontSize:12 }}>📋 Paste race guide</div>
+              <div style={{ fontSize:10, color:"var(--ink3)", marginTop:2, fontWeight:400 }}>
+                Full aid station tables from the race website
+              </div>
+            </button>
+            <button className="btn btn-o" style={{ flex:1, textAlign:"left", padding:"10px 12px" }}
+              onClick={() => setImportMode("bulk")}>
+              <div style={{ fontWeight:700, fontSize:12 }}>📝 Quick list</div>
+              <div style={{ fontSize:10, color:"var(--ink3)", marginTop:2, fontWeight:400 }}>
+                One checkpoint per line, any format
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Active import panel */}
+        {importMode && (
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+              marginBottom:8 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:"var(--accent)" }}>
+                {importMode === "structured" ? "📋 Paste race guide" : "📝 Quick list"}
+              </div>
+              <button className="btn btn-g btn-sm" onClick={closeImport}>Cancel</button>
+            </div>
+
+            <textarea
+              className="inp"
+              placeholder={importMode === "structured"
+                ? "Paste the full aid station section from your race guide…\n\nAid Station | Bangalore Road | 21.4km\nSection Stats: 5.6km | +525m | -115m\nCut-off: 10:30am | 4 hours\nSupport Crew: ❌\nDrop Bags: ✅\nToilet: ✅\n\nWater Point | Langleys Road | 46.2km\n..."
+                : "One checkpoint per line — name, section distance, elevation gain.\nAny of these formats work:\n\nDairyville, 14.9km, +400m\nBangalore Road 5.6km 525m\nUrumbilum Creek | 6.1km | +230m\nFinish 3.8km 35m"}
+              value={pasteText}
+              onChange={e => { setPasteText(e.target.value); setParseErrors([]); }}
+              style={{ width:"100%", minHeight:150, fontFamily:"var(--mono)",
+                fontSize:11, resize:"vertical", boxSizing:"border-box" }} />
+
+            {parseErrors.length > 0 && (
+              <div style={{ marginTop:6, padding:"8px 10px", background:"#fff0f0",
+                border:"1px solid var(--warn)", borderRadius:"var(--r)",
+                fontSize:11, color:"var(--warn)", lineHeight:1.6 }}>
+                {parseErrors.map((e, i) => <div key={i}>⚠ {e}</div>)}
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:8, marginTop:8 }}>
+              <button className="btn btn-p" style={{ flex:1 }}
+                onClick={handleImport}
+                disabled={!pasteText.trim()}>
+                Import
+              </button>
+              <button className="btn btn-g"
+                onClick={() => { setPasteText(""); setParseErrors([]); }}>
+                Clear
+              </button>
+            </div>
+            <div style={{ fontSize:10, color:"var(--ink4)", marginTop:6 }}>
+              Existing checkpoints will be replaced. You can edit them after importing.
+            </div>
+          </div>
+        )}
+      </div>
       <div className="card" style={{ padding:16, marginBottom:12 }}>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
           <div style={{ gridColumn:"1 / -1" }}>
@@ -3772,9 +3870,16 @@ function RaceDayScreen({ racePlan, onChange }) {
         <div key={i} className="card card-l" style={{ padding:14, marginBottom:10 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
             marginBottom:10 }}>
-            <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700,
-              color:"var(--accent)", textTransform:"uppercase", letterSpacing:.5 }}>
-              Leg {i + 1}
+            <div>
+              <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700,
+                color:"var(--accent)", textTransform:"uppercase", letterSpacing:.5 }}>
+                Leg {i + 1}
+              </div>
+              {leg.cutoff && (
+                <div style={{ fontSize:10, color:"var(--warn)", fontWeight:600, marginTop:2 }}>
+                  ⏱ Cut-off: {leg.cutoff}
+                </div>
+              )}
             </div>
             <div style={{ display:"flex", gap:6 }}>
               {i > 0 && (

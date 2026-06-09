@@ -6,6 +6,7 @@
 export { generateRacePlan }  from "./calculator.js";
 export { computeLegFuelling } from "./fuelling.js";
 export { recommendGear }      from "./gear.js";
+export { parseAidStations, parseBulkCheckpoints } from "./parseAidStations.js";
 
 export {
   CARB_TARGET_PER_HOUR,
