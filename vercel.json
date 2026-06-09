@@ -3,11 +3,6 @@
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)",     "destination": "/" }
   ],
-  "functions": {
-    "api/*.js": {
-      "runtime": "nodejs20.x"
-    }
-  },
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
