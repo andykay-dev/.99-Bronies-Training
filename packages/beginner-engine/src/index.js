@@ -1,0 +1,28 @@
+// ─────────────────────────────────────────────────────────────
+//  BEGINNER ENGINE — index.js
+//  Couch-to-Distance beginner training plans.
+//  generateBeginnerPlan(profile, feedbackMap?) → Week[]
+// ─────────────────────────────────────────────────────────────
+
+// Main entry point
+export { generateBeginnerPlan } from "./assembler.js";
+
+// Input parsing + session builders (exposed for inspection / testing / UI)
+export {
+  parseCurrentKm,
+  parseTargetKm,
+  parseTimeline,
+  buildBeginnerSession,
+  restSession,
+} from "./sessions.js";
+
+// Beginner-specific constants
+export {
+  CURRENT_KM_MAP,
+  TARGET_KM_MAP,
+  TIMELINE_MAP,
+  SESSION_RATIOS,
+  BEGINNER_PACE,
+  WALK_RUN_FRACTION,
+  WALK_RUN_INTERVALS,
+} from "./constants.js";

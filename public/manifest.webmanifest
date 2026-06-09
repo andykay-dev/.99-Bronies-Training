@@ -1,0 +1,13 @@
+{
+  "name": "Bronies .99 Training",
+  "short_name": "Bronies",
+  "description": "Embrace the .99 chaos — periodised training plans for the crew",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#2E5FA3",
+  "theme_color": "#2E5FA3",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

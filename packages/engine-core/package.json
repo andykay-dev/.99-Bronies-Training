@@ -1,0 +1,15 @@
+{
+  "name": "@bronies/engine-core",
+  "version": "0.1.0",
+  "description": "Shared foundation for Bronies training engines — physiology (Daniels VDOT pace zones), Monday-anchored calendar helpers, and common constants. No plan-building, no React, no side-effects.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./physiology": "./src/physiology.js",
+    "./scheduler": "./src/scheduler.js",
+    "./constants": "./src/constants.js"
+  },
+  "keywords": ["running", "training", "daniels", "vdot", "bronies"],
+  "license": "MIT"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@bronies/beginner-engine",
+  "version": "0.1.0",
+  "description": "Beginner training plan engine for the BRONIES .99 app. Couch-to-Distance methodology — walk/run intervals progressing to continuous running, gentle linear volume ramp, confidence-first coaching. Pure JS, no React, no side-effects.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./sessions": "./src/sessions.js",
+    "./constants": "./src/constants.js"
+  },
+  "dependencies": {
+    "@bronies/engine-core": "^0.1.0"
+  },
+  "keywords": ["running", "training-plan", "couch-to-5k", "beginner", "bronies"],
+  "license": "MIT"
+}

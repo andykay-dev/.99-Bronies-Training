@@ -1,0 +1,18 @@
+{
+  "name": "@bronies/event-engine",
+  "version": "0.1.0",
+  "description": "Event-driven training plan engine for the BRONIES .99 app. Daniels/Pfitzinger methodology — phased periodisation, two-quality-session model, peak long runs, taper. Pure JS, no React, no side-effects.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./sessions": "./src/sessions.js",
+    "./scheduler": "./src/scheduler.js",
+    "./constants": "./src/constants.js"
+  },
+  "dependencies": {
+    "@bronies/engine-core": "^0.1.0"
+  },
+  "keywords": ["running", "training-plan", "daniels", "pfitzinger", "marathon", "ultra", "bronies"],
+  "license": "MIT"
+}

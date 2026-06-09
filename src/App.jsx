@@ -1,4 +1,34 @@
 import React, { useState, useEffect } from "react";
+
+// ─────────────────────────────────────────────────────────────
+//  ENGINE IMPORTS
+// ─────────────────────────────────────────────────────────────
+import {
+  parseTime, fmtPace, fmtDuration, fmtDate, parseLocalDate,
+  weeksBetween, mondayOf, dateFromAnchor, dateFromToday,
+  weekStatus, dayDate, goalMult, to99, derivePaces,
+  longRunCap, estimateLongRunTime, elevationGuide, bucketElevation,
+  DAYS, PHASES, RACE_DISTANCES, TRAINING_GOALS,
+  SLOT_TYPES, computeFeedbackAdj,
+} from "@bronies/engine-core";
+
+import {
+  generatePlan, buildSlot,
+  normaliseSlot, primarySlot, hasStrength, isWorkoutSlot,
+  parseEditableSession, regenerateFromReps, makeW,
+  getPhase, peakLongRunWeeks,
+  DEFAULT_DAY_PLAN, DEFAULT_WORKOUT_MINUTES, WORKOUT_SUBTYPES, PRIORITY,
+} from "@bronies/event-engine";
+
+import {
+  generateBeginnerPlan,
+  parseCurrentKm, parseTargetKm, parseTimeline,
+} from "@bronies/beginner-engine";
+
+import {
+  generateRacePlan,
+  FUEL_LOOKUP, DEFAULT_STRATEGY, DEFAULT_LEG,
+} from "@bronies/race-engine";
 import { useForm } from "@formspree/react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -29,6 +59,10 @@ const HORSE_FOOTER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYA
 //  loaded. The 8-bit overrides are layered on top via [data-skin="8bit"]
 //  on <body>. Press Start 2P font is lazy-loaded only when needed.
 // ─────────────────────────────────────────────────────────────
+
+// Skin cycle order — add new skins here to make them available in rotation.
+// "surprise" skins will be added here when ready.
+const SKINS = ["default", "8bit", "dark"];
 
 function loadPixelFont() {
   if (document.getElementById("pixel-font-link")) return;
@@ -271,6 +305,50 @@ const G = ({ skin }) => {
 
       .copied{color:var(--accent)!important;}
       select option{background:#fff;}
+
+      /* ── Dark Trainer skin — applied when <body data-skin="dark"> ── */
+      body[data-skin="dark"]{
+        --ink:#E4E8F0; --ink2:#A0B4CC; --ink3:#6A7F96; --ink4:#3A4D60;
+        --rule:#1E2B38; --bg:#0A0B0E; --white:#111318; --black:#E4E8F0;
+        --accent:#39FF9A; --accent-light:rgba(57,255,154,0.08);
+        --warn:#FF4757; --yellow:#FFD32A; --blue:#00B4FF;
+        --hud:#0D0F13; --nav:#111318; --navtab:#161C24;
+        --gold:#39FF9A; --gold-dark:#22CC72; --gold-pale:rgba(57,255,154,0.06);
+        --card-shadow:0 1px 3px rgba(0,0,0,0.6);
+        --sans:'Space Grotesk','IBM Plex Sans',sans-serif;
+        --mono:'IBM Plex Mono',monospace;
+        --display:'IBM Plex Mono',monospace;
+        --r:6px;
+        background:#0A0B0E;
+      }
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+      body[data-skin="dark"] .card{background:#111318;border-color:#1E2B38;box-shadow:0 1px 3px rgba(0,0,0,.6);}
+      body[data-skin="dark"] .card-l{border-left-color:var(--accent);}
+      body[data-skin="dark"] .btn{border-radius:5px;}
+      body[data-skin="dark"] .btn-p{background:#39FF9A;border-color:#22CC72;color:#0A0B0E;box-shadow:none;}
+      body[data-skin="dark"] .btn-p:hover:not(:disabled){background:#22CC72;filter:none;}
+      body[data-skin="dark"] .btn-o{background:#111318;border-color:#39FF9A;color:#39FF9A;box-shadow:none;}
+      body[data-skin="dark"] .btn-o:hover:not(:disabled){background:rgba(57,255,154,0.08);filter:none;}
+      body[data-skin="dark"] .btn-g{background:#111318;border-color:#1E2B38;color:#3A4D60;box-shadow:none;}
+      body[data-skin="dark"] .btn-g:hover:not(:disabled){background:#161C24;color:#6A7F96;filter:none;}
+      body[data-skin="dark"] .btn-pill.on{background:rgba(57,255,154,0.12);color:#39FF9A;border-color:#39FF9A;}
+      body[data-skin="dark"] .inp,
+      body[data-skin="dark"] .sel{background:#0D0F13;border-color:#1E2B38;color:#E4E8F0;}
+      body[data-skin="dark"] .inp:focus{border-color:#39FF9A;box-shadow:0 0 0 1px rgba(57,255,154,0.3);}
+      body[data-skin="dark"] .inp::placeholder{color:#2A3A4A;}
+      body[data-skin="dark"] label.lbl{color:#3A4D60;letter-spacing:1.2px;}
+      body[data-skin="dark"] .tag{border-radius:4px;font-size:10px;}
+      body[data-skin="dark"] .tag-a{background:rgba(255,71,87,0.1);color:#FF4757;border-color:#FF4757;}
+      body[data-skin="dark"] .tag-b{background:rgba(0,180,255,0.08);color:#00B4FF;border-color:#00B4FF;}
+      body[data-skin="dark"] .tag-c{background:rgba(57,255,154,0.08);color:#39FF9A;border-color:#39FF9A;}
+      body[data-skin="dark"] .tag-d{background:#111318;color:#3A4D60;border-color:#1E2B38;}
+      body[data-skin="dark"] .nav-tab{font-size:11px;letter-spacing:.5px;}
+      body[data-skin="dark"] .garmin-box{background:#0D0F13;border-color:#1E2B38;border-radius:6px;}
+      body[data-skin="dark"] .rule{border-top-color:#1E2B38;}
+      body[data-skin="dark"] .spin{border-top-color:#39FF9A;}
+      body[data-skin="dark"] select option{background:#111318;color:#E4E8F0;}
+      body[data-skin="dark"] ::-webkit-scrollbar{width:6px;background:#0A0B0E;}
+      body[data-skin="dark"] ::-webkit-scrollbar-thumb{background:#1E2B38;border-radius:3px;}
     `}</style>
   );
 };
@@ -279,14 +357,10 @@ const G = ({ skin }) => {
 // ─────────────────────────────────────────────────────────────
 //  CONSTANTS
 // ─────────────────────────────────────────────────────────────
-// ── AEST/AEDT Sydney time ────────────────────────────────────
-// We use the Intl API to get the current wall-clock date in Sydney,
-// then work entirely in plain YYYY-MM-DD strings so there is no
-// UTC-offset drift when comparing dates.
-
-function todaySydney() {
-  // Returns a plain Date whose year/month/day match Sydney wall-clock today.
-  // Uses numeric Date constructor — unambiguously local midnight on all engines.
+// Sydney wall-clock today as a plain Date object (year/month/day only, no time component).
+// We define this inline because the engine's todaySydneyStr() returns a YYYY-MM-DD string
+// (right for engine internals), but the UI needs a real Date for comparisons and arithmetic.
+function todaySydneyDate() {
   const parts = new Intl.DateTimeFormat("en-AU", {
     timeZone: "Australia/Sydney",
     year: "numeric", month: "2-digit", day: "2-digit",
@@ -296,8 +370,16 @@ function todaySydney() {
   const d = parseInt(parts.find(p => p.type === "day").value, 10);
   return new Date(y, m, d, 0, 0, 0, 0);
 }
+const TODAY = todaySydneyDate();
 
-const TODAY = todaySydney();
+// String version (YYYY-MM-DD) for planStartDate storage — engine internals use strings throughout.
+function todaySydneyStr() {
+  const t = todaySydneyDate();
+  const y = t.getFullYear();
+  const m = String(t.getMonth() + 1).padStart(2, "0");
+  const d = String(t.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 // Monday of the week that contains TODAY.
 // JS getDay(): 0=Sun,1=Mon,...,6=Sat  →  offset to Mon-anchored week.
@@ -309,97 +391,39 @@ const THIS_WEEK_MONDAY = (() => {
   return d;
 })();
 
-const PHASES = {
-  BASE:  { label:"Base",  color:"#1a6b6b" },
-  BUILD: { label:"Build", color:"#7a4f00" },
-  PEAK:  { label:"Peak",  color:"#c0392b" },
-  TAPER: { label:"Taper", color:"#5b2d8e" },
-  RACE:  { label:"Race",  color:"#1a472a" },
-};
 
-const PRIORITY = {
-  A:{ label:"A Race",  cls:"tag-a" },
-  B:{ label:"B Race",  cls:"tag-b" },
-  C:{ label:"C Race",  cls:"tag-c" },
-  D:{ label:"Fun Run", cls:"tag-d" },
-};
 
-const TRAINING_GOALS = [
-  { value:"goal_event", label:"Training for an Event",              desc:"I have a race I'm preparing for",                    mult:1.00 },
-  { value:"healthier",  label:"Get me back to being a Healthy Bronie", desc:"Building habits, getting fitter — no pressure",   mult:0.74 },
-  { value:"hangout",    label:"Coffee With the Boys",               desc:"Here for the vibes — no pressure",                  mult:0.55 },
-];
-
-const RACE_DISTANCES = [
-  { value:"5k",   label:"5km",                    km:5    },
-  { value:"10k",  label:"10km",                   km:10   },
-  { value:"15k",  label:"15km",                   km:15   },
-  { value:"half", label:"Half Marathon (21.1km)",  km:21.1 },
-  { value:"mara", label:"Marathon (42.2km)",       km:42.2 },
-];
-
-// Day picker — Mon=0 ... Sun=6
-const DAYS = [
-  { id:"mon", label:"Monday",    short:"MON" },
-  { id:"tue", label:"Tuesday",   short:"TUE" },
-  { id:"wed", label:"Wednesday", short:"WED" },
-  { id:"thu", label:"Thursday",  short:"THU" },
-  { id:"fri", label:"Friday",    short:"FRI" },
-  { id:"sat", label:"Saturday",  short:"SAT" },
-  { id:"sun", label:"Sunday",    short:"SUN" },
-];
-
-// Normalise a dayPlan slot value to an array.
-// Old format: "workout" → ["workout"]
-// New format: ["workout","strength"] → ["workout","strength"]
-// Workout subtypes (hills, fartlek, intervals) are kept as-is for buildSlot to use
-function normaliseSlot(raw) {
-  if (!raw) return ["rest"];
-  if (Array.isArray(raw)) return raw.length ? raw : ["rest"];
-  return [raw];
+// ─────────────────────────────────────────────────────────────
+//  UI-ONLY DATE HELPERS  (thin wrappers over engine-core dayDate)
+// ─────────────────────────────────────────────────────────────
+function weeksUntil(d) {
+  return d ? Math.max(1, Math.floor((new Date(d) - TODAY) / (1000 * 60 * 60 * 24 * 7))) : 16;
 }
 
-// Returns the primary run type from a slot array (first non-strength, non-rest entry)
-function primarySlot(slots) {
-  const s = normaliseSlot(slots);
-  return s.find(k => k !== "strength") || s[0] || "rest";
+function dayIsPast(weekStartDate, dayIndex) {
+  const d = dayDate(weekStartDate, dayIndex);
+  return d ? d < TODAY : false;
 }
 
-// Returns true if strength is included in a slot array
-function hasStrength(slots) {
-  return normaliseSlot(slots).includes("strength");
+function dayIsToday(weekStartDate, dayIndex) {
+  const d = dayDate(weekStartDate, dayIndex);
+  if (!d) return false;
+  return d.getFullYear() === TODAY.getFullYear()
+      && d.getMonth()    === TODAY.getMonth()
+      && d.getDate()     === TODAY.getDate();
 }
 
-// Workout subtype keys — treated as "workout" for planning purposes but force a specific session type
-const WORKOUT_SUBTYPES = ["hills", "fartlek", "intervals", "tempo"];
-function isWorkoutSlot(p) {
-  return p === "workout" || WORKOUT_SUBTYPES.includes(p);
+// ─────────────────────────────────────────────────────────────
+//  PLAN BUILDER — routes to the correct engine
+// ─────────────────────────────────────────────────────────────
+function buildPlan(profile, event, feedbackMap) {
+  if (!profile) return [];
+  if (profile.trainingGoal === "healthier") {
+    return generateBeginnerPlan(profile, feedbackMap || {});
+  }
+  const hasEvent = !!(event && event.date);
+  return generatePlan(profile, hasEvent ? event : null, feedbackMap || {});
 }
-const SLOT_TYPES = {
-  workout:   { label:"Workout",           icon:"⚡", color:"#7a4f00",
-               desc:"Intervals, tempo, hills, fartlek" },
-  easy:      { label:"Easy Run",          icon:"🦶", color:"#1a56db",
-               desc:"Conversational pace, recovery" },
-  long:      { label:"Long Run",          icon:"🏔", color:"#5b2d8e",
-               desc:"Time on feet — the cornerstone session" },
-  bronies:   { label:"BRONIES",           icon:"☕", color:"#1a472a",
-               desc:"The 7.99km Bronie social run — coffee after" },
-  strength:  { label:"Strength Training", icon:"🏋", color:"#8B0000",
-               desc:"Chat to the Bronies about what you SHOULD be doing" },
-  rest:      { label:"Rest",              icon:"💤", color:"#9a9a9a",
-               desc:"Recovery — protect the gains" },
-};
-
-const DEFAULT_DAY_PLAN = {
-  mon:"rest", tue:"rest", wed:"bronies", thu:"rest",
-  fri:"bronies", sat:"long", sun:"rest",
-};
-// Default workout duration target per day, in minutes.
-// 45min is the standard. Users can bump certain days up to 60/75/90 in their profile.
-// On a Bronies day (Wed/Fri) the duration is often capped so they can still do coffee.
-const DEFAULT_WORKOUT_MINUTES = {
-  mon:45, tue:45, wed:45, thu:45, fri:45, sat:45, sun:45,
-};
 
 // ─────────────────────────────────────────────────────────────
 //  BRONIE HANGOUT SUGGESTIONS — for the no-pressure crew
@@ -523,1079 +547,20 @@ const DEMO_SCENARIOS = {
 // ─────────────────────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────────────────────
-function parseTime(s) {
-  if (!s) return null;
-  if (typeof s !== "string") return null;
-  const parts = s.trim().split(":").map(Number);
-  if (parts.length === 2) return parts[0]*60 + parts[1];
-  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
-  return null;
-}
-
-function fmtPace(sec) {
-  const s = Math.round(Math.abs(sec));
-  return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
-}
-
-function fmtDuration(minutes) {
-  const h = Math.floor(minutes/60), m = Math.round(minutes%60);
-  if (h === 0) return `${m}min`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}min`;
-}
-
-function weeksUntil(d) {
-  return d ? Math.max(1, Math.floor((new Date(d)-TODAY)/(1000*60*60*24*7))) : 16;
-}
-
-// Total weeks spanning two dates (Monday-anchored). Used so the plan's length
-// reflects the original start date, not "today", so past weeks stay in the plan.
-function weeksBetween(fromDateStr, toDateStr) {
-  const a = parseLocalDate(fromDateStr);
-  const b = parseLocalDate(toDateStr);
-  if (!a || !b) return 16;
-  const aMonday = mondayOf(a);
-  const bMonday = mondayOf(b);
-  return Math.max(1, Math.round((bMonday - aMonday) / (1000*60*60*24*7)));
-}
-
-function mondayOf(date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0=Sun, 1=Mon ... 6=Sat
-  const diff = (day === 0 ? -6 : 1 - day);
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-// Returns the Monday date string for week offset i from an anchor date.
-function dateFromAnchor(anchorStr, i) {
-  const anchor = parseLocalDate(anchorStr);
-  if (!anchor) return dateFromToday(i);
-  const monday = mondayOf(anchor);
-  monday.setDate(monday.getDate() + i * 7);
-  const yy = monday.getFullYear();
-  const mm = String(monday.getMonth() + 1).padStart(2, "0");
-  const dd = String(monday.getDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
-}
-
-function dateFromToday(w) {
-  // Returns the Monday date for week offset w (0 = this week's Monday).
-  // Always Mon-anchored so day indices 0–6 = Mon–Sun correctly.
-  const d = new Date(THIS_WEEK_MONDAY);
-  d.setDate(d.getDate() + w * 7);
-  const yy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
-}
-
-function fmtDate(s) {
-  if (!s) return "";
-  const d = parseLocalDate(s);
-  if (!d) return "";
-  return d.toLocaleDateString("en-AU", {day:"numeric", month:"short", year:"numeric"});
-}
-
-// Parse a YYYY-MM-DD string as local midnight (not UTC midnight)
-function parseLocalDate(s) {
-  if (!s) return null;
-  // Defensive: if a Date object is passed, return it directly. If anything else
-  // non-string sneaks through, bail out rather than crashing on s.split.
-  if (s instanceof Date) return isNaN(s) ? null : new Date(s);
-  if (typeof s !== "string") return null;
-  const [y, m, d] = s.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d, 0, 0, 0, 0);
-}
-
-// Returns "past" | "current" | "future" for a week given its startDate string
-function weekStatus(startDate) {
-  if (!startDate) return "future";
-  const start = parseLocalDate(startDate);
-  const end   = new Date(start); end.setDate(end.getDate() + 6); end.setHours(23,59,59,999);
-  if (TODAY > end)   return "past";
-  if (TODAY >= start) return "current";
-  return "future";
-}
-
-// Returns the Date for a specific day within a week (0=Mon…6=Sun)
-function dayDate(weekStartDate, dayIndex) {
-  const start = parseLocalDate(weekStartDate);
-  if (!start) return null;
-  start.setDate(start.getDate() + dayIndex);
-  return start;
-}
-
-// Is a specific day in the past?
-function dayIsPast(weekStartDate, dayIndex) {
-  const d = dayDate(weekStartDate, dayIndex);
-  return d ? d < TODAY : false;
-}
-
-// Is a specific day exactly today? Compare date parts, not timestamps.
-function dayIsToday(weekStartDate, dayIndex) {
-  const d = dayDate(weekStartDate, dayIndex);
-  if (!d) return false;
-  return d.getFullYear() === TODAY.getFullYear()
-      && d.getMonth()    === TODAY.getMonth()
-      && d.getDate()     === TODAY.getDate();
-}
-
-function goalMult(goal) {
-  return TRAINING_GOALS.find(g => g.value === goal)?.mult || 1.0;
-}
-
-// Snap final displayed distance to end in .99 — embrace the chaos
-function to99(km) {
-  if (!km || km <= 0) return 0.99;
-  const floored = Math.floor(km);
-  return (floored > 0 ? floored - 1 : 0) + 0.99;
-}
-
-function derivePaces(profile) {
-  const refDist = RACE_DISTANCES.find(d => d.value === (profile.refDistance || "10k"));
-  let ep = 380;
-  if (refDist && profile.refTime) {
-    const totalSec = parseTime(profile.refTime);
-    if (totalSec && totalSec > 0) {
-      const racePace = totalSec / refDist.km;
-      const adj = Math.max(50, 90 - refDist.km * 1.2);
-      ep = Math.round(racePace + adj);
-    }
-  }
-  const tp   = Math.round(ep * 0.87);
-  const ip   = Math.round(ep * 0.79);
-  const wucd = Math.round(ep * 1.04);
-  let mp = Math.round(ep * 0.92);
-  if (profile.goalTime && profile.eventDistanceNum) {
-    const gs = parseTime(profile.goalTime);
-    if (gs && gs > 0) mp = Math.round(gs / profile.eventDistanceNum);
-  }
-  return { ep, tp, ip, mp, wucd };
-}
-
-function longRunCap(isTrail, distNum, ep) {
-  const maxMins = distNum >= 80
-    ? (isTrail ? 420 : 360)
-    : distNum >= 42
-      ? (isTrail ? 300 : 270)
-      : (isTrail ? 240 : 210);
-  const longPace = isTrail ? ep * 1.18 : ep * 1.06;
-  const byTime   = Math.floor((maxMins * 60) / longPace);
-  const hardCap = distNum >= 80 ? Math.round(distNum * 0.58)
-                : distNum >= 50 ? 38
-                : distNum >= 42 ? 36
-                : distNum >= 28 ? 26
-                : distNum >= 18 ? 18
-                : distNum >= 15 ? 14
-                : distNum >= 10 ? 10
-                : Math.round(distNum * 0.85);
-  return Math.min(hardCap, byTime);
-}
-
-function peakLongRunWeeks(distNum, trainingWks) {
-  let raw;
-  // Ultra distances (50km+): 3 peak long runs only if the plan is long enough to
-  // space them properly (13+ weeks). Shorter plans get 2 — there isn't room for 3
-  // peaks with a recovery week between each plus a taper.
-  const canFitThree = trainingWks >= 13;
-  if (distNum >= 80) {
-    raw = canFitThree
-      ? [Math.round(trainingWks * 0.58), Math.round(trainingWks * 0.70), Math.round(trainingWks * 0.82)]
-      : [Math.round(trainingWks * 0.66), Math.round(trainingWks * 0.80)];
-  } else if (distNum >= 30) {
-    raw = canFitThree
-      ? [Math.round(trainingWks * 0.65), Math.round(trainingWks * 0.74), Math.round(trainingWks * 0.82)]
-      : [Math.round(trainingWks * 0.68), Math.round(trainingWks * 0.80)];
-  } else {
-    raw = [
-      Math.round(trainingWks * 0.70),
-      Math.round(trainingWks * 0.80),
-    ];
-  }
-  // Guarantee at least 2 weeks between peaks so a recovery/down week always sits
-  // between them — you never do two peak long runs in consecutive weeks.
-  const spaced = [];
-  raw.sort((a, b) => a - b).forEach(w => {
-    if (spaced.length === 0) {
-      spaced.push(w);
-    } else {
-      const last = spaced[spaced.length - 1];
-      spaced.push(Math.max(w, last + 2));
-    }
-  });
-  // Peaks must finish before the taper. With total = trainingWks + 1, the taper is
-  // the final 2 weeks and race is the last week, so the latest PEAK-phase week is
-  // (trainingWks - 2). If spacing pushed peaks too late, shift the whole set earlier.
-  const latestAllowed = trainingWks - 2;
-  if (spaced.length && spaced[spaced.length - 1] > latestAllowed) {
-    const shift = spaced[spaced.length - 1] - latestAllowed;
-    for (let i = 0; i < spaced.length; i++) spaced[i] -= shift;
-  }
-  // Final safety: keep them strictly increasing and ≥ week 1 after the shift
-  for (let i = 1; i < spaced.length; i++) {
-    if (spaced[i] <= spaced[i - 1] + 1) spaced[i] = spaced[i - 1] + 2;
-  }
-  return spaced.filter(w => w >= 1);
-}
-
-function estimateLongRunTime(km, isTrail, ep) {
-  const pace = isTrail ? ep * 1.18 : ep * 1.06;
-  return Math.round((km * pace) / 60);
-}
-
-// Elevation guidance — thresholds (in metres of total ascent) for "low",
-// "medium" and "high" depending on race distance.
-// Anchored to 50km: low = 250m (<250 = flat/low), high = 3000m+ (slider maxes out)
-// Scales linearly: low = 5m/km, high = 60m/km
-function elevationGuide(distNum) {
-  const d = Math.max(5, parseFloat(distNum) || 50);
-  // 50km → low 250m (5m/km), high 3000m (60m/km)
-  const low  = Math.round(d * 5);
-  const high = Math.round(d * 60);
-  const mid  = Math.round((low + high) / 2);
-  // Slider max == high so "3000m+" sits at the far end of the scale
-  return { low, mid, high, max: high };
-}
-
-// Map a numeric elevation (m) to the categorical bucket the plan builder uses
-function bucketElevation(meters, distNum) {
-  if (!meters || meters < 0) return "flat";
-  const { low, high } = elevationGuide(distNum);
-  // flat = below 50% of low threshold (< 125m for 50km)
-  if (meters < low * 0.5) return "flat";
-  if (meters < low)       return "low";
-  if (meters < high)      return "medium";
-  return "high";
-}
 
 // Estimate the duration in minutes for any built session
-function sessionMinutes(session, paces, isTrail) {
-  if (!session || !session.distance || session.distance < 0.01) return 0;
-  if (session.estMins) return session.estMins;
-  if (session.wtype === "long") return estimateLongRunTime(session.distance, isTrail, paces.ep);
-  if (session.wtype === "race") return null;
-  // Approx: distance / (ep * 1.04) for easy, ep for everything else
-  const mult = session.wtype === "easy" ? 1.04 : 1.0;
-  return Math.round(session.distance * paces.ep * mult / 60);
-}
-
-function getPhase(wn, total) {
-  if (wn === total) return "RACE";
-  const rem = total - wn;
-  if (rem <= 2) return "TAPER";
-  const pct = wn / total;
-  if (pct <= 0.28) return "BASE";
-  if (pct <= 0.62) return "BUILD";
-  return "PEAK";
-}
-
-// ─────────────────────────────────────────────────────────────
-//  WORKOUT LIBRARY
-// ─────────────────────────────────────────────────────────────
-function makeW(paces){
-  const {ep,tp,ip,mp,wucd}=paces;
-  const pace400 =Math.round(ip*0.88);
-  const pace800 =Math.round(ip*0.93);
-  const pace1200=Math.round(ip*0.97);
-  const pace1k  =ip;
-  const pace2k  =Math.round(ip*0.98);
-  const epSlow=ep+10; const epFast=ep-10;
-  const wuSlow=wucd+10; const wuFast=wucd-10;
-
-  return {
-    reps400:(reps,restSec=75)=>{
-      const km=to99(4+reps*0.4);
-      const effortSec=Math.round(400/(1000/pace400));
-      const mins=Math.round(20+reps*(effortSec+restSec)/60);
-      return {
-        wtype:"intervals",label:`${reps}×400m Reps`,distance:km,estMins:mins,
-        summary:`WU 2km · ${reps}×400m @ ${fmtPace(pace400)}/km · ${restSec}s rest · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${reps}×400m @ ${fmtPace(pace400)}/km with ${restSec}s standing rest between reps.\n\nCool down 2km easy.\n\nShort and sharp — controlled aggression. Don't sprint the first one.\nEach rep should feel the same. If they're getting slower, you went out too hard.`,
-        garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${reps}:`,`  INTERVAL — Distance: 0.40km | Pace: ${fmtPace(pace400)}/km`,`  REST     — Time: 1:${String(restSec%60).padStart(2,"0")} | Standing rest`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    reps800:(reps,restSec=90)=>{
-      const km=to99(4+reps*0.8);
-      const effortSec=Math.round(800/(1000/pace800));
-      const mins=Math.round(20+reps*(effortSec+restSec)/60);
-      return {
-        wtype:"intervals",label:`${reps}×800m Reps`,distance:km,estMins:mins,
-        summary:`WU 2km · ${reps}×800m @ ${fmtPace(pace800)}/km · 90s rest · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${reps}×800m @ ${fmtPace(pace800)}/km with 90s standing rest between reps.\n\nCool down 2km easy.\n\nFind your rhythm by rep 2. Each rep should feel controlled but uncomfortable.\nIf the last rep falls apart, you went too hard early.`,
-        garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${reps}:`,`  INTERVAL — Distance: 0.80km | Pace: ${fmtPace(pace800)}/km`,`  REST     — Time: 1:30 | Standing rest`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    reps1200:(reps,restSec=90)=>{
-      const km=to99(4+reps*1.2);
-      const effortSec=Math.round(1200/(1000/pace1200));
-      const mins=Math.round(20+reps*(effortSec+restSec)/60);
-      const restLabel=restSec<=90?"1:30":"2:00";
-      return {
-        wtype:"intervals",label:`${reps}×1200m Reps`,distance:km,estMins:mins,
-        summary:`WU 2km · ${reps}×1200m @ ${fmtPace(pace1200)}/km · ${restLabel} rest · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${reps}×1200m @ ${fmtPace(pace1200)}/km with ${restLabel} standing rest between reps.\n\nCool down 2km easy.\n\nStay relaxed in the shoulders — drive with your arms in the final 200m.\nThe rest is short on purpose. Get comfortable being uncomfortable.`,
-        garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${reps}:`,`  INTERVAL — Distance: 1.20km | Pace: ${fmtPace(pace1200)}/km`,`  REST     — Time: ${restLabel} | Standing rest`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    intervals:(reps,restSec=90)=>{
-      const km=to99(4+reps*1.0);
-      const effortSec=Math.round(1000/(1000/pace1k));
-      const mins=Math.round(20+reps*(effortSec+restSec)/60);
-      return {
-        wtype:"intervals",label:`${reps}×1km Intervals`,distance:km,estMins:mins,
-        summary:`WU 2km · ${reps}×1km @ ${fmtPace(pace1k)}/km · 90s rest · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${reps}×1km @ ${fmtPace(pace1k)}/km with 90s standing rest between reps.\n\nCool down 2km easy.\n\nThe classic. Stay even across all reps — the last one should feel like work but not a death march.\nIf you're significantly slower on the last rep, start slower next time.`,
-        garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${reps}:`,`  INTERVAL — Distance: 1.00km | Pace: ${fmtPace(pace1k)}/km`,`  REST     — Time: 1:30 | Standing rest`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    reps2k:(reps,restSec=120)=>{
-      const km=to99(4+reps*2.0);
-      const effortSec=Math.round(2000/(1000/pace2k));
-      const mins=Math.round(20+reps*(effortSec+restSec)/60);
-      return {
-        wtype:"intervals",label:`${reps}×2km Reps`,distance:km,estMins:mins,
-        summary:`WU 2km · ${reps}×2km @ ${fmtPace(pace2k)}/km · 2min rest · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${reps}×2km @ ${fmtPace(pace2k)}/km with 2min standing rest between reps.\n\nCool down 2km easy.\n\nLonger reps — sits between interval pace and tempo.\nGo out controlled and build across each rep. The first km should feel almost easy.\nThe second km is where the work happens.`,
-        garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${reps}:`,`  INTERVAL — Distance: 2.00km | Pace: ${fmtPace(pace2k)}/km`,`  REST     — Time: 2:00 | Standing rest`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    combo2k1k1k:()=>{
-      const e2k=Math.round(2000/(1000/pace2k));
-      const e1k=Math.round(1000/(1000/pace1k));
-      const mins=Math.round(20+(e2k+90+e1k+90+e1k)/60);
-      const km=to99(4+2+1+1);
-      return {
-        wtype:"intervals",label:"2km / 1km / 1km",distance:km,estMins:mins,
-        summary:`WU 2km · 2km rep · 90s · 1km · 90s · 1km · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n1×2km @ ${fmtPace(pace2k)}/km — 90s standing rest\n1×1km @ ${fmtPace(pace1k)}/km — 90s standing rest\n1×1km @ ${fmtPace(pace1k)}/km\n\nCool down 2km easy.\n\nThe 2km sets the tone — go out controlled.\nThe two 1kms that follow should be at the same effort, slightly faster pace.\nDon't die on the 2km trying to be a hero.`,
-        garmin:[`WARM UP  — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`INTERVAL — Distance: 2.00km | Pace: ${fmtPace(pace2k)}/km`,`REST     — Time: 1:30 | Standing rest`,`INTERVAL — Distance: 1.00km | Pace: ${fmtPace(pace1k)}/km`,`REST     — Time: 1:30 | Standing rest`,`INTERVAL — Distance: 1.00km | Pace: ${fmtPace(pace1k)}/km`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    combo2x2k:()=>{
-      const effortSec=Math.round(2000/(1000/pace2k));
-      const mins=Math.round(20+(effortSec*2+120)/60);
-      const km=to99(4+4);
-      return {
-        wtype:"intervals",label:"2×2km Reps",distance:km,estMins:mins,
-        summary:`WU 2km · 2×2km @ ${fmtPace(pace2k)}/km · 2min rest · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n2×2km @ ${fmtPace(pace2k)}/km with 2min standing rest.\n\nCool down 2km easy.\n\nTwo solid sustained reps. The rest is short — you should feel it going into the second one.\nAim to run the second rep at the same pace or slightly faster than the first.`,
-        garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×2:`,`  INTERVAL — Distance: 2.00km | Pace: ${fmtPace(pace2k)}/km`,`  REST     — Time: 2:00 | Standing rest`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    combo2k1200800:()=>{
-      const e2k=Math.round(2000/(1000/pace2k));
-      const e1200=Math.round(1200/(1000/pace1200));
-      const e800=Math.round(800/(1000/pace800));
-      const mins=Math.round(20+(e2k+90+e1200+90+e800)/60);
-      const km=to99(4+2+1.2+0.8);
-      return {
-        wtype:"intervals",label:"2km / 1200m / 800m",distance:km,estMins:mins,
-        summary:`WU 2km · 2km → 1200m → 800m · getting faster · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n1×2km @ ${fmtPace(pace2k)}/km — 90s standing rest\n1×1200m @ ${fmtPace(pace1200)}/km — 90s standing rest\n1×800m @ ${fmtPace(pace800)}/km\n\nCool down 2km easy.\n\nDescending distance — each rep gets shorter and faster.\nThe 2km sets the aerobic foundation. The 800m at the end is pure speed.\nGive everything on that last 800.`,
-        garmin:[`WARM UP  — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`INTERVAL — Distance: 2.00km | Pace: ${fmtPace(pace2k)}/km`,`REST     — Time: 1:30 | Standing rest`,`INTERVAL — Distance: 1.20km | Pace: ${fmtPace(pace1200)}/km`,`REST     — Time: 1:30 | Standing rest`,`INTERVAL — Distance: 0.80km | Pace: ${fmtPace(pace800)}/km`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    comboDescending:()=>{
-      const e1200=Math.round(1200/(1000/pace1200));
-      const e800=Math.round(800/(1000/pace800));
-      const e400=Math.round(400/(1000/pace400));
-      const mins=Math.round(20+(e1200+90+e800+75+e400)/60);
-      const km=to99(4+1.2+0.8+0.4);
-      return {
-        wtype:"intervals",label:"1200 / 800 / 400 Descending",distance:km,estMins:mins,
-        summary:`WU 2km · 1200m → 800m → 400m · paces get faster · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n1×1200m @ ${fmtPace(pace1200)}/km — 90s rest\n1×800m @ ${fmtPace(pace800)}/km — 75s rest\n1×400m @ ${fmtPace(pace400)}/km\n\nCool down 2km easy.\n\nEach rep gets shorter AND faster. Go out controlled on the 1200 — you'll earn the 400.\nThe 400 at the end should feel like a sprint. That's the point.`,
-        garmin:[`WARM UP  — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`INTERVAL — Distance: 1.20km | Pace: ${fmtPace(pace1200)}/km`,`REST     — Time: 1:30 | Standing rest`,`INTERVAL — Distance: 0.80km | Pace: ${fmtPace(pace800)}/km`,`REST     — Time: 1:15 | Standing rest`,`INTERVAL — Distance: 0.40km | Pace: ${fmtPace(pace400)}/km`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    comboAscending:()=>{
-      const e400=Math.round(400/(1000/pace400));
-      const e800=Math.round(800/(1000/pace800));
-      const e1200=Math.round(1200/(1000/pace1200));
-      const mins=Math.round(20+(e400+75+e800+90+e1200)/60);
-      const km=to99(4+0.4+0.8+1.2);
-      return {
-        wtype:"intervals",label:"400 / 800 / 1200 Ascending",distance:km,estMins:mins,
-        summary:`WU 2km · 400m → 800m → 1200m · building into the longest rep · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n1×400m @ ${fmtPace(pace400)}/km — 75s rest\n1×800m @ ${fmtPace(pace800)}/km — 90s rest\n1×1200m @ ${fmtPace(pace1200)}/km\n\nCool down 2km easy.\n\nStart fast, build the distance. The 1200 at the end is the real test.\nHold the pace from the 800 into the 1200 — don't let it slip.`,
-        garmin:[`WARM UP  — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`INTERVAL — Distance: 0.40km | Pace: ${fmtPace(pace400)}/km`,`REST     — Time: 1:15 | Standing rest`,`INTERVAL — Distance: 0.80km | Pace: ${fmtPace(pace800)}/km`,`REST     — Time: 1:30 | Standing rest`,`INTERVAL — Distance: 1.20km | Pace: ${fmtPace(pace1200)}/km`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    combo800s400s:()=>{
-      const e800=Math.round(800/(1000/pace800));
-      const e400=Math.round(400/(1000/pace400));
-      const mins=Math.round(20+(3*(e800+90)+120+3*(e400+75))/60);
-      const km=to99(4+3*0.8+3*0.4);
-      return {
-        wtype:"intervals",label:"3×800m + 3×400m",distance:km,estMins:mins,
-        summary:`WU 2km · 3×800m then 3×400m · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n3×800m @ ${fmtPace(pace800)}/km with 90s rest between.\n2min rest.\n3×400m @ ${fmtPace(pace400)}/km with 75s rest between.\n\nCool down 2km easy.\n\nTwo phases — the 800s build the engine, the 400s teach it to fire fast when tired.\nThe 400s should feel snappy even though you've already done 3×800.`,
-        garmin:[`WARM UP    — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×3:`,`  INTERVAL — Distance: 0.80km | Pace: ${fmtPace(pace800)}/km`,`  REST     — Time: 1:30 | Standing rest`,`TRANSITION — Time: 2:00 | Easy walk`,`REPEAT ×3:`,`  INTERVAL — Distance: 0.40km | Pace: ${fmtPace(pace400)}/km`,`  REST     — Time: 1:15 | Standing rest`,`COOL DOWN  — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    combo1200s400s:()=>{
-      const e1200=Math.round(1200/(1000/pace1200));
-      const e400=Math.round(400/(1000/pace400));
-      const mins=Math.round(20+(2*(e1200+90)+150+4*(e400+75))/60);
-      const km=to99(4+2*1.2+4*0.4);
-      return {
-        wtype:"intervals",label:"2×1200m + 4×400m",distance:km,estMins:mins,
-        summary:`WU 2km · 2×1200m then 4×400m · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n2×1200m @ ${fmtPace(pace1200)}/km with 90s rest.\n2.5min rest.\n4×400m @ ${fmtPace(pace400)}/km with 75s rest.\n\nCool down 2km easy.\n\nThe 1200s set the tone. The 400s finish the job.\nDon't die on the first 1200 — you've got 4 fast 400s waiting for you.`,
-        garmin:[`WARM UP    — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×2:`,`  INTERVAL — Distance: 1.20km | Pace: ${fmtPace(pace1200)}/km`,`  REST     — Time: 1:30 | Standing rest`,`TRANSITION — Time: 2:30 | Easy walk`,`REPEAT ×4:`,`  INTERVAL — Distance: 0.40km | Pace: ${fmtPace(pace400)}/km`,`  REST     — Time: 1:15 | Standing rest`,`COOL DOWN  — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    tempo:(min)=>({
-      wtype:"tempo",label:`${min}min Tempo`,
-      distance:to99(4+min*60/tp),estMins:20+min,
-      summary:`WU 2km · ${min}min @ ${fmtPace(tp)}/km · CD 2km`,
-      detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${min}min continuous tempo @ ${fmtPace(tp)}/km — comfortably hard, short phrases only.\n\nCool down 2km easy.\n\nIf you can speak in full sentences, you're going too easy.\nIf you can't speak at all, you're going too hard. Short phrases is the sweet spot.`,
-      garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`TEMPO     — Time: ${min}:00 | Pace: ${fmtPace(tp)}/km`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-    }),
-    tempoStrides:(min)=>({
-      wtype:"tempo",label:`${min}min Tempo + Strides`,
-      distance:to99(4+min*60/tp),estMins:20+min+8,
-      summary:`WU 2km · ${min}min tempo · 4×1min strides · CD 2km`,
-      detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${min}min tempo @ ${fmtPace(tp)}/km.\n\nThen 4×1min strides @ ${fmtPace(pace400)}/km, 1min easy float between.\n\nCool down 2km easy.\n\nThe strides after tempo teach your legs to turn over fast when they're already tired.`,
-      garmin:[`WARM UP   — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`TEMPO     — Time: ${min}:00 | Pace: ${fmtPace(tp)}/km`,`REPEAT ×4:`,`  STRIDE  — Time: 1:00 | Pace: ${fmtPace(pace400)}/km`,`  FLOAT   — Time: 1:00 | Easy jog`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-    }),
-    fartlek:(totalMin)=>({
-      wtype:"fartlek",label:`${totalMin}min Fartlek`,
-      distance:to99(totalMin*60/((ep+pace800)/2)),estMins:totalMin,
-      summary:`${totalMin}min free-form speed play`,
-      detail:`${totalMin}min continuous. Alternate freely between surges and easy floating.\n\n• Surges: 30–90s @ ${fmtPace(pace800)}/km effort\n• Float: ${fmtPace(ep)}/km or easier (keep moving, don't stop)\n\nNo structure — run entirely by feel. Perfect for the BRONIES Wednesday or Friday run.`,
-      garmin:[`NOTE: Free-run mode recommended for fartlek.`,`Total Duration: ${totalMin}:00`,`Surge target: ${fmtPace(pace800)}/km effort`,`Float target: ${fmtPace(ep)}/km or easier`],
-    }),
-    onOff:(reps,onSec,offSec)=>({
-      wtype:"onoff",label:`${reps}×${onSec}s On/Off`,
-      distance:to99(4+reps*(onSec+offSec)/60*0.2),
-      estMins:20+Math.round(reps*(onSec+offSec)/60),
-      summary:`WU 2km · ${reps}×(${onSec}s hard / ${offSec}s float) · CD 2km`,
-      detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${reps} reps:\n• ${onSec}s HARD @ ${fmtPace(pace800)}/km effort\n• ${offSec}s FLOAT @ ${fmtPace(ep)}/km (keep moving — never stop)\n\nCool down 2km easy.`,
-      garmin:[`WARM UP — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${reps}:`,`  ON  — Time: 0:${String(onSec).padStart(2,"0")} | Pace: ${fmtPace(pace800)}/km`,`  OFF — Time: 1:00 | Pace: ${fmtPace(ep)}/km`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-    }),
-    overUnder:(sets)=>({
-      wtype:"overunder",label:`${sets}×Over/Under KMs`,
-      distance:to99(4+sets*2),
-      estMins:20+Math.round(sets*2*60/Math.round((ep*0.91+ep*1.06)/2)*60),
-      summary:`WU 2km · ${sets}×(1km fast / 1km slow) · CD 2km`,
-      detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${sets} sets of alternating km blocks:\n• "Over" km: ${fmtPace(Math.round(ep*0.91))}/km — faster than comfortable\n• "Under" km: ${fmtPace(Math.round(ep*1.06))}/km — active recovery\n\nNo stopping between sets. Cool down 2km easy.`,
-      garmin:[`WARM UP — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${sets}:`,`  OVER  — Distance: 1.00km | Pace: ${fmtPace(Math.round(ep*0.91))}/km`,`  UNDER — Distance: 1.00km | Pace: ${fmtPace(Math.round(ep*1.06))}/km`,`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-    }),
-    ladder:(steps)=>{
-      const s=steps||[3,2,1,2,3];
-      const totalEffort=s.reduce((a,b)=>a+b,0);
-      return {
-        wtype:"ladder",label:`Ladder (${s.join("-")}min)`,
-        distance:to99(4+totalEffort*60/ip),
-        estMins:20+totalEffort+(s.length-1)*2,
-        summary:`WU 2km · ${s.map(x=>x+"min").join("/")} @ ${fmtPace(ip)}/km · CD 2km`,
-        detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\nRun the ladder with 2min easy jog between efforts:\n${s.map(x=>`• ${x}min @ ${fmtPace(ip)}/km`).join("\n")}\n\nCool down 2km easy.\n\nThe shortest effort is your peak — give it everything.`,
-        garmin:[`WARM UP — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,...s.flatMap((x,idx)=>[`EFFORT ${idx+1} — Time: ${x}:00 | Pace: ${fmtPace(ip)}/km`,`REST    — Time: 2:00 | Easy jog`]),`COOL DOWN — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-      };
-    },
-    progression:(totalMin)=>({
-      wtype:"progression",label:`${totalMin}min Progression`,
-      distance:to99(totalMin*60/Math.round((ep+tp)/2)),
-      estMins:totalMin,
-      summary:`${totalMin}min — easy → building → tempo finish`,
-      detail:`${totalMin}min continuous:\n\n• First ${Math.round(totalMin/3)}min @ ${fmtPace(ep)}/km (easy)\n• Middle ${Math.round(totalMin/3)}min @ ${fmtPace(Math.round((ep+tp)/2))}/km (building)\n• Final ${Math.round(totalMin/3)}min @ ${fmtPace(tp)}/km (tempo)\n\nHold back hard in the first third.`,
-      garmin:[`EASY     — Time: ${Math.round(totalMin/3)}:00 | Pace: ${fmtPace(ep)}/km`,`BUILDING — Time: ${Math.round(totalMin/3)}:00 | Pace: ${fmtPace(Math.round((ep+tp)/2))}/km`,`TEMPO    — Time: ${Math.round(totalMin/3)}:00 | Pace: ${fmtPace(tp)}/km`],
-    }),
-    hillSprints:(sets)=>({
-      wtype:"hills",label:`${sets}×1min Hill Sprints`,
-      distance:to99((40+sets*2.5)/60*(60/wucd)),
-      estMins:40+Math.round(sets*2.5),
-      summary:`WU 2km · ${sets}×1min max effort · walk back · CD 2km`,
-      detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km. Find a 5–8% grade hill.\n\n${sets}×1min max uphill sprint.\nWALK back down after each sprint (~90s) — this is your full recovery.\n\nCool down 2km easy.\n\nWalking back is not optional. Full recovery between reps is what makes these effective.`,
-      garmin:[`WARM UP    — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${sets}:`,`  SPRINT    — Time: 1:00 | Effort: Maximum uphill`,`  WALK DOWN — Time: 1:30 | Walk back to start — full recovery`,`COOL DOWN  — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-    }),
-    hillRepeats:(sets)=>({
-      wtype:"hills",label:`${sets}×2min Hill Efforts`,
-      distance:to99((30+sets*4)/60*(60/wucd)),
-      estMins:30+sets*4,
-      summary:`WU 2km · ${sets}×2min hard uphill · walk back · CD 2km`,
-      detail:`Warm up 2km easy @ ${fmtPace(wucd)}/km.\n\n${sets}×2min hard uphill effort at RPE 7–8.\nWalk back down to the start (~2min) as full recovery between reps.\n\nCool down 2km easy.\n\nRPE 7–8 means you could say a few words but not hold a conversation.`,
-      garmin:[`WARM UP    — Distance: 2.00km | Pace: ${fmtPace(wucd)}/km`,`REPEAT ×${sets}:`,`  EFFORT    — Time: 2:00 | Hard uphill (RPE 7–8)`,`  WALK BACK — Time: 2:00 | Walk back to start — full recovery`,`COOL DOWN  — Distance: 2.00km | Pace: ${fmtPace(ep)}/km`],
-    }),
-    bronieRun:()=>({
-      wtype:"bronies",label:"BRONIES Run",distance:7.99,
-      estMins:Math.round(7.99*ep/60),
-      summary:"7.99km · Little Black Pony Café",
-      detail:`7.99km easy social run from the Little Black Pony Coffee Shop.\n\nConversational pace @ ${fmtPace(ep)}/km or slower.\nFinish on the .99. Always.\n\nCoffee after. Non-negotiable.`,
-      garmin:[`Distance: 7.99km | Auto Lap every 1km`,`Pace: ≤${fmtPace(Math.round(ep*0.94))}/km — conversational only`,`NOTE: Free-run mode recommended.`],
-    }),
-    easyRun:(min,withStrides=false)=>{
-      const m=min||40;
-      const dist=to99(m*60/Math.round(ep*1.04));
-      const stridePace=Math.round(ip*0.95);
-      const strideNote=withStrides
-        ? `\n\nAfter your run: 4×20sec strides @ ${fmtPace(stridePace)}/km effort.\n• Accelerate smoothly over the first 5sec, hold for 10sec, decelerate for 5sec.\n• 60sec easy walk between each.\n• These should feel fast but controlled — not a sprint. Legs light, not heavy.\n• Done in 6–8min. Don't skip them.`
-        : "";
-      const strideGarmin=withStrides
-        ? [`EASY RUN — Duration: ${m}:00 | Pace: ${fmtPace(ep)} – ${fmtPace(Math.round(ep*1.15))}/km | Zone 1–2`,
-           `STRIDES ×4:`,
-           `  STRIDE — Time: 0:20 | Effort: fast & controlled (~${fmtPace(stridePace)}/km)`,
-           `  WALK   — Time: 1:00 | Easy recovery walk`]
-        : [`Duration: ${m}:00 | Pace: ${fmtPace(ep)} – ${fmtPace(Math.round(ep*1.15))}/km | Zone 1–2`];
-      return {
-        wtype:"easy",
-        label:withStrides?`${m}min Easy + Strides`:`${m}min Easy Run`,
-        distance:dist,estMins:withStrides?m+8:m,
-        summary:withStrides?`${m}min easy · 4×20sec strides · ${dist}km`:`${m}min easy · ${dist}km`,
-        detail:`${m}min easy aerobic run @ ${fmtPace(Math.round(ep*1.04))}/km.\n\nFully conversational — you should be able to hold a full conversation.\nIf you're breathing hard, slow down.\n\nEasy runs are where most of your aerobic fitness is built. Don't skip them.`+strideNote,
-        garmin:strideGarmin,
-      };
-    },
-    longEasy:(km,isTrail,epOverride)=>{
-      const e=epOverride||ep;
-      const d=to99(km);
-      const mins=estimateLongRunTime(km,isTrail,e);
-      return {
-        wtype:"long",label:"Long Easy Run",distance:d,estMins:mins,
-        summary:`${d}km easy · ${fmtDuration(mins)}`,
-        detail:`${d}km at easy aerobic pace @ ${fmtPace(Math.round(e*1.04))}/km or slower.\nEstimated moving time: ${fmtDuration(mins)}${isTrail?" (trail — run by effort, walk steep climbs)":""}.\n\nTime on feet — no pace pressure. This is the cornerstone of the whole block.\nEat every 30–40min. Drink to thirst. Walk the hills if you need to.\n\nAlways finish on the .99.`,
-        garmin:[`Distance: ${d}km | Auto Lap every 5km`,`Pace zone: ${fmtPace(e)} – ${fmtPace(Math.round(e*1.15))}/km (Zone 1–2)`,`Nutrition alert: Every 30:00`,...(isTrail?[`NOTE: Run by effort on trail — ignore pace on climbs.`]:[])],
-      };
-    },
-    longPaceBlocks:(km,epOverride,mpOverride)=>{
-      const e=epOverride||ep;
-      const m=mpOverride||mp;
-      const d=to99(km);
-      const mins=estimateLongRunTime(km,false,e);
-      return {
-        wtype:"long",label:"Long Run — Pace Blocks",distance:d,estMins:mins,
-        summary:`${d}km · easy → race pace → fast finish · ${fmtDuration(mins)}`,
-        detail:`${d}km structured long run (${fmtDuration(mins)}):\n\n• First ${Math.round(km*0.35)}km @ ${fmtPace(Math.round(e*1.04))}/km (easy warm-in)\n• Middle ${Math.round(km*0.40)}km @ ${fmtPace(m)}/km (goal race pace)\n• Final ${Math.round(km*0.25)}km @ ${fmtPace(Math.round(m*0.97))}/km (slightly faster)\n\nThe most race-specific long run in the block.`,
-        garmin:[`EASY BLOCK  — Distance: ${Math.round(km*0.35)}.00km | Pace: ${fmtPace(Math.round(e*1.04))}/km`,`RACE PACE   — Distance: ${Math.round(km*0.40)}.00km | Pace: ${fmtPace(m)}/km`,`FAST FINISH — Distance: ${Math.round(km*0.25)}.00km | Pace: ${fmtPace(Math.round(m*0.97))}/km`,`Auto Lap every 5km`],
-      };
-    },
-    shakeout:(min)=>{
-      const m=min||30;
-      const dist=to99(m*60/Math.round(ep*1.12));
-      return {
-        wtype:"easy",label:"Shakeout Run",distance:dist,estMins:m,
-        summary:`${m}min very easy shakeout · ${dist}km`,
-        detail:`${m}min easy jog @ ${fmtPace(Math.round(ep*1.12))}/km or slower.\n\nLegs only — no effort, no pace targets.`,
-        garmin:[`Duration: ${m}:00 | Pace: ≥${fmtPace(Math.round(ep*1.08))}/km | Zone 1`],
-      };
-    },
-    rest:()=>({
-      wtype:"rest",label:"Rest Day",distance:0,estMins:0,
-      summary:"Complete rest",
-      detail:`Full rest day.\n\nSleep well. Eat enough. Stay hydrated.\nLight walking is fine — everything else can wait.\n\nRest is where the adaptation happens. Protect it.`,
-      garmin:[`No workout today. Rest and recover.`],
-    }),
-    raceDay:(name,dist)=>({
-      wtype:"race",label:"RACE DAY 🏁",distance:parseFloat(dist)||0,estMins:null,
-      summary:`${dist} · ${name}`,
-      detail:`All the training is done. Trust the work.\n\nMorning checklist:\n• Wake 90–120min before start\n• Eat your practiced race-day breakfast\n• 5–10min easy shakeout jog + dynamic stretches\n• Arrive at start with time to spare\n\nRace execution:\n• First 20% — hold back, feel controlled\n• Middle 60% — settle into your rhythm\n• Final 20% — give everything that's left\n\nAlways finish on the .99.`,
-      garmin:[`Race Day — use standard race recording.`,`Auto Lap every 5km.`,`Don't forget to press START.`],
-    }),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
-//  REP-COUNT EDITING — detect editable sessions and rebuild from a rep override
-// ─────────────────────────────────────────────────────────────
-// Detects whether a session label matches one of our editable rep-based formats.
-// Returns { kind, reps, restSec } or null if the session isn't rep-editable.
-// kind tells us which W.* method to call when regenerating.
-function parseEditableSession(session) {
-  if (!session?.label) return null;
-  const lbl = session.label;
-  // Pattern: "N×<thing>" — only match at the very start
-  const m = lbl.match(/^(\d+)×(\d+m\s+Reps|\d+km\s+(?:Reps|Intervals)|1km\s+Intervals|1min\s+Hill\s+Sprints|2min\s+Hill\s+Efforts)/);
-  if (!m) return null;
-  const reps = parseInt(m[1], 10);
-  const tail = m[2];
-  // Map the tail to a kind + default rest
-  if (/^400m/.test(tail))    return { kind:"reps400",     reps, restSec: 75, min:4, max:12, label:"400m reps" };
-  if (/^800m/.test(tail))    return { kind:"reps800",     reps, restSec: 90, min:3, max:10, label:"800m reps" };
-  if (/^1200m/.test(tail))   return { kind:"reps1200",    reps, restSec: 90, min:3, max:8,  label:"1200m reps" };
-  if (/^1km/.test(tail))     return { kind:"intervals",   reps, restSec: 90, min:3, max:8,  label:"1km intervals" };
-  if (/^2km/.test(tail))     return { kind:"reps2k",      reps, restSec:120, min:2, max:5,  label:"2km reps" };
-  if (/Hill\s+Sprints/.test(tail))   return { kind:"hillSprints", reps, restSec: 0, min:4, max:12, label:"hill sprints" };
-  if (/Hill\s+Efforts/.test(tail))   return { kind:"hillRepeats", reps, restSec: 0, min:3, max:10, label:"hill repeats" };
-  return null;
-}
-
-// Regenerate a fresh session object by calling the right W method with new params.
-// Returns the full session including label, summary, detail, distance, estMins, AND garmin steps —
-// so the Garmin export reflects the override correctly.
-function regenerateFromReps(W, kind, reps, restSec) {
-  switch (kind) {
-    case "reps400":     return W.reps400(reps, restSec);
-    case "reps800":     return W.reps800(reps, restSec);
-    case "reps1200":    return W.reps1200(reps, restSec);
-    case "intervals":   return W.intervals(reps, restSec);
-    case "reps2k":      return W.reps2k(reps, restSec);
-    case "hillSprints": return W.hillSprints(reps);
-    case "hillRepeats": return W.hillRepeats(reps);
-    default: return null;
-  }
-}
 
 // ─────────────────────────────────────────────────────────────
 //  PHASE-AWARE WORKOUT SELECTOR
-// ─────────────────────────────────────────────────────────────
-
-
-// ─────────────────────────────────────────────────────────────
-//  PLAN BUILDER
-//  Driven by the user's dayPlan — which day gets which slot type
-// ─────────────────────────────────────────────────────────────
-function buildPlan(profile, event, feedbackMap) {
-  if (!profile) return [];
-  const fb       = feedbackMap || {};
-  const dayPlan  = profile.dayPlan || DEFAULT_DAY_PLAN;
-  const hasEvent = !!(event && event.date);
-
-  if (!hasEvent) {
-    // No event — generic ongoing plan (8 weeks rolling)
-    return buildOngoingPlan(profile, dayPlan, fb);
-  }
-
-  return buildEventPlan(profile, event, dayPlan, fb);
-}
 
 // Days considered "social" Bronie runs — no hills, no tempo, keep it accessible and fun
-function pickWorkout(W,wn,dayId,slotIdx,isTrail,hillAccess,isDown,forcedSubtype,phase,targetMins){
-  const hasHills=hillAccess==="lots of hills"||hillAccess==="some hills";
-  const mins = targetMins || 45;
-  // Wed/Fri default to INTERVALS (per user preference — short, sharp, coffee-compatible)
-  // unless the user explicitly chose a different subtype.
-  const isBroniesDay = dayId === "wed" || dayId === "fri";
-  if (isBroniesDay && !forcedSubtype) {
-    forcedSubtype = "intervals";
-  }
-  if(forcedSubtype==="hills"){
-    return hasHills
-      ?(wn%2===0?W.hillRepeats(Math.min(8,4+Math.floor(wn/4))):W.hillSprints(Math.min(10,6+Math.floor(wn/4))))
-      :W.fartlek(Math.min(45, mins));
-  }
-  if(forcedSubtype==="fartlek") return W.fartlek(Math.min(mins, 28+Math.floor(wn/3)*3));
-  if(forcedSubtype==="intervals") return pickIntervalByPhase(W,wn,slotIdx,phase||"BUILD",mins);
-  if(forcedSubtype==="tempo") return W.tempo(Math.min(mins-20, 15+Math.floor(wn/3)*3));
-  if(isDown){
-    // Down weeks: a single light quality touch, rotating so consecutive down weeks differ.
-    const downPool=[
-      ()=>W.fartlek(28),()=>W.reps400(6,90),()=>W.tempo(15),
-      ()=>W.onOff(6,60,90),()=>W.progression(32),()=>W.reps800(4,90),()=>W.comboAscending(),
-    ];
-    return downPool[(wn+slotIdx*3)%downPool.length]();
-  }
-
-  const ph=phase||"BUILD";
-  // TWO-QUALITY-SESSION MODEL (Daniels/Pfitzinger): when a week has two workout days,
-  // they must hit DIFFERENT systems — slot 0 = SPEED/VO2max, slot 1 = THRESHOLD/tempo.
-  // This prevents the duplicate-workout problem and trains both energy pathways.
-  //
-  // Hills run FORTNIGHTLY (even weeks) for runners with hill access / trail events —
-  // they replace the speed slot that week, since hills build the same power/strength.
-  const useHills = (hasHills || isTrail) && slotIdx === 0 && wn % 2 === 0;
-  if (useHills) {
-    return wn % 4 === 0
-      ? W.hillRepeats(Math.min(8, 4 + Math.floor(wn / 4)))
-      : W.hillSprints(Math.min(10, 6 + Math.floor(wn / 4)));
-  }
-
-  const isThresholdSlot = slotIdx >= 1; // 2nd workout of the week = threshold/tempo
-  if (isThresholdSlot) return pickThresholdWorkout(W, wn, ph, mins);
-  return pickSpeedWorkout(W, wn, ph, mins);
-}
-
-// SPEED / VO2max sessions — short-to-medium reps, building in length through the phases.
-// targetMins controls the session size: 45 = default, 60-75 = more reps, 90 = max volume.
-function pickSpeedWorkout(W, wn, phase, targetMins) {
-  const m = targetMins || 45;
-  // Scale rep counts based on target duration. Each "tier" adds ~15min of work.
-  const big = m >= 75, medium = m >= 60;
-  let pool;
-  if (phase === "BASE") {
-    pool = big ? [
-      () => W.reps400(10, 75), () => W.reps800(6, 90),
-      () => W.reps400(12, 75), () => W.fartlek(45),
-    ] : medium ? [
-      () => W.reps400(8, 90), () => W.reps800(5, 90),
-      () => W.reps400(10, 75), () => W.fartlek(40),
-    ] : [
-      () => W.reps400(6, 90), () => W.reps800(4, 90),
-      () => W.reps400(8, 75), () => W.fartlek(32),
-    ];
-  } else if (phase === "PEAK") {
-    pool = big ? [
-      () => W.intervals(8, 90), () => W.reps1200(5, 90),
-      () => W.combo2k1k1k(), () => W.reps2k(3, 120),
-      () => W.combo2x2k(), () => W.ladder([4, 3, 2, 1, 2, 3, 4, 4]),
-    ] : medium ? [
-      () => W.intervals(7, 90), () => W.reps1200(4, 90),
-      () => W.combo2k1k1k(), () => W.reps2k(2, 120),
-      () => W.combo2x2k(), () => W.ladder([4, 3, 2, 1, 2, 3, 4]),
-    ] : [
-      () => W.intervals(5, 90), () => W.reps1200(3, 90),
-      () => W.reps2k(2, 120), () => W.intervals(6, 90),
-      () => W.reps800(6, 90), () => W.combo800s400s(),
-    ];
-  } else { // BUILD
-    pool = big ? [
-      () => W.intervals(7, 90), () => W.reps800(8, 90),
-      () => W.reps1200(5, 90), () => W.combo800s400s(),
-      () => W.ladder([3, 2, 1, 2, 3, 4]), () => W.combo1200s400s(),
-    ] : medium ? [
-      () => W.intervals(6, 90), () => W.reps800(7, 90),
-      () => W.reps1200(4, 90), () => W.combo800s400s(),
-      () => W.ladder([3, 2, 1, 2, 3]), () => W.combo1200s400s(),
-    ] : [
-      () => W.intervals(5, 90), () => W.reps800(6, 90),
-      () => W.reps1200(3, 90), () => W.combo800s400s(),
-      () => W.ladder([3, 2, 1, 2, 3]), () => W.combo1200s400s(),
-    ];
-  }
-  return pool[(wn - 1) % pool.length]();
-}
-
-// THRESHOLD / TEMPO sessions — sustained "comfortably hard" work, building in duration.
-// targetMins controls the tempo length. Tempo time = mins - 20 (for warm-up + cool-down).
-function pickThresholdWorkout(W, wn, phase, targetMins) {
-  const m = targetMins || 45;
-  const tempoMins = Math.max(12, m - 20); // 25 for 45min, 40 for 60min, 55 for 75min
-  let pool;
-  if (phase === "BASE") {
-    pool = [
-      () => W.tempo(Math.min(tempoMins, 18)), () => W.progression(m - 10),
-      () => W.onOff(Math.min(12, 8 + (m-45)/5), 60, 60), () => W.tempo(Math.min(tempoMins, 20)),
-    ];
-  } else if (phase === "PEAK") {
-    pool = [
-      () => W.tempo(tempoMins), () => W.overUnder(Math.min(6, 5 + (m-45)/15)),
-      () => W.progression(m - 5), () => W.tempoStrides(tempoMins),
-      () => W.tempo(Math.min(tempoMins + 2, 45)),
-    ];
-  } else { // BUILD
-    pool = [
-      () => W.tempo(Math.min(tempoMins, 35)), () => W.overUnder(Math.min(5, 4 + (m-45)/15)),
-      () => W.progression(m - 10), () => W.tempoStrides(Math.min(tempoMins, 30)),
-      () => W.tempo(24),
-    ];
-  }
-  return pool[(wn - 1) % pool.length]();
-}
-
-function pickTaperWorkout(W,wn,slotIdx){
-  // Taper: keep it sharp but short. Speed slot stays speed, threshold slot stays threshold.
-  if (slotIdx >= 1) return W.tempo(15);
-  const pool=[()=>W.reps400(6,90),()=>W.reps800(4,90),()=>W.fartlek(25)];
-  return pool[wn%pool.length]();
-}
-
-function pickIntervalByPhase(W,wn,slotIdx,phase,targetMins){
-  const m = targetMins || 45;
-  const big = m >= 75, medium = m >= 60;
-  if(phase==="BASE") return (wn+slotIdx)%2===0?W.reps400(big?10:medium?8:6,90):W.reps800(big?6:medium?5:4,90);
-  if(phase==="PEAK"){
-    const opts = big ? [()=>W.reps1200(5,90),()=>W.intervals(8,90),()=>W.combo2k1k1k(),()=>W.reps2k(3,120)]
-               : medium ? [()=>W.reps1200(4,90),()=>W.intervals(7,90),()=>W.combo2k1k1k(),()=>W.reps2k(2,120)]
-                        : [()=>W.reps1200(3,90),()=>W.intervals(5,90),()=>W.combo2k1k1k(),()=>W.reps2k(2,120)];
-    return opts[(wn+slotIdx)%opts.length]();
-  }
-  const opts = big ? [()=>W.intervals(6,90),()=>W.reps800(7,90),()=>W.reps1200(5,90),()=>W.combo800s400s()]
-             : medium ? [()=>W.intervals(5,90),()=>W.reps800(6,90),()=>W.reps1200(4,90),()=>W.combo800s400s()]
-                      : [()=>W.intervals(4,90),()=>W.reps800(5,90),()=>W.reps1200(3,90),()=>W.combo800s400s()];
-  return opts[(wn+slotIdx)%opts.length]();
-}
 
 
 
-function buildEventPlan(profile, event, dayPlan, fb) {
-  // Anchor the plan to the date the user first created it (planStartDate). This is what
-  // keeps past, completed weeks in the plan as time passes — without it, every render
-  // would generate a fresh plan starting "today", erasing history.
-  const planAnchor  = profile.planStartDate || todaySydney();
-  const totalSpan   = Math.min(24, weeksBetween(planAnchor, event.date));
-  const trainingWks = Math.max(1, totalSpan);
-  const total       = trainingWks + 1;
-  const isTrail     = event.type === "trail";
-  const distNum     = parseFloat(event.distance) || 42;
-  const gm          = goalMult(profile.trainingGoal || "goal_event");
-  const paces       = derivePaces({
-    ...profile,
-    eventDistanceNum: distNum,
-    goalTime: event.goalTime,
-  });
-  const W           = makeW(paces);
-  const maxLong     = longRunCap(isTrail, distNum, paces.ep);
-  const peakWeeks   = peakLongRunWeeks(distNum, trainingWks);
-
-  // ── Down week identification ─────────────────────────────
-  // Rules:
-  // 1. Every 3rd build week is a routine down week (load management)
-  // 2. Any week BETWEEN two peak weeks is a down week (inter-peak recovery)
-  // 3. The week IMMEDIATELY AFTER every peak long run is always a down week
-  //    — you never go straight from a peak into another big effort
-  // 4. Taper and race weeks are never flagged as down weeks (handled separately)
-
-  const interPeakDownWeeks = new Set();
-  const postPeakDownWeeks  = new Set();
-
-  if (peakWeeks.length >= 2) {
-    for (let pi = 0; pi < peakWeeks.length - 1; pi++) {
-      const peakA = peakWeeks[pi];
-      const peakB = peakWeeks[pi + 1];
-      // All weeks between the two peaks are down weeks
-      for (let w = peakA + 1; w < peakB; w++) {
-        interPeakDownWeeks.add(w);
-      }
-    }
-  }
-
-  // Week after every peak (except the last peak which leads into taper)
-  peakWeeks.forEach((pw, i) => {
-    const afterPeak = pw + 1;
-    const isLastPeak = i === peakWeeks.length - 1;
-    // Don't mark as down if it's already a peak, taper, or race week
-    if (!isLastPeak && !peakWeeks.includes(afterPeak)) {
-      postPeakDownWeeks.add(afterPeak);
-    }
-    // Last peak: the week after is always a down/recovery week before taper
-    if (isLastPeak && !peakWeeks.includes(afterPeak)) {
-      postPeakDownWeeks.add(afterPeak);
-    }
-  });
-
-  let cumulativeAdj = 0;
-
-  const weeks = Array.from({ length: total }, (_, i) => {
-    const wn         = i + 1;
-    const phase      = getPhase(wn, total);
-    const isTaper    = phase === "TAPER";
-    const isRaceWk   = phase === "RACE";
-    const pct        = wn / trainingWks;
-    const startDate  = dateFromAnchor(planAnchor, i);
-    const taperWkIdx = isTaper ? wn - (trainingWks - 2) : 0;
-
-    const prevFb = fb[wn - 1];
-    if (prevFb === "too_hard") cumulativeAdj -= 1.5;
-    if (prevFb === "too_easy") cumulativeAdj += 1.5;
-    if (prevFb === "ok")       cumulativeAdj = Math.max(0, cumulativeAdj * 0.5);
-    const fbAdj = Math.max(-6, Math.min(8, cumulativeAdj));
-
-    const isPeakLong       = peakWeeks.includes(wn);
-    const isInterPeakDown  = interPeakDownWeeks.has(wn);
-    const isPostPeakDown   = postPeakDownWeeks.has(wn);
-    const isAnyRecovery    = isInterPeakDown || isPostPeakDown;
-
-    // A week is "down" if: every-3rd-week cycle, inter-peak, or post-peak
-    const isDown = (
-      ((wn % 3 === 0) && !["TAPER","RACE","PEAK"].includes(phase) && !isPeakLong)
-      || isAnyRecovery
-    );
-
-    // ── Race week: special structure ───────────────────────
-    if (isRaceWk) {
-      const sessions = {};
-      DAYS.forEach((d, idx) => { sessions[d.id] = W.rest(); });
-      // Race goes on Saturday by default (events typically Saturday)
-      sessions.mon = { ...W.easyRun(30), label:"Race Week Opener",
-        summary:"30min easy + 4 strides — remind legs how to move" };
-      sessions.wed = { ...W.easyRun(25), label:"Shakeout + Strides",
-        summary:"25min easy + 3×1min fast — 3 days out" };
-      sessions.sat = W.raceDay(event.name, event.distance);
-
-      return {
-        weekNum: wn, phase, startDate, isDown: false, isRaceWeek: true, isPeakLong: false,
-        weekLabel: "Race Week",
-        sessions,
-        totalKm: Math.round(sessions.mon.distance + sessions.wed.distance + (parseFloat(event.distance) || 0)),
-        longRunMins: 0,
-        note: "🏁 Race week — protect your legs Mon–Fri. Everything you need is already in the tank.",
-      };
-    }
-
-    // ── Long run distance ──────────────────────────────────
-    const minRecovery = Math.round(distNum * 0.40);
-    let longKm;
-    if (isPeakLong) {
-      const peakIdx = peakWeeks.indexOf(wn);
-      const isUltra = distNum >= 80;
-      const mult = isUltra
-        ? (peakIdx === 1 ? 1.00 : peakIdx === 0 ? 0.95 : 0.97)
-        : (peakIdx === 0 ? 0.95 : peakIdx === 1 ? 1.00 : 0.98);
-      longKm = Math.round(maxLong * mult);
-    } else if (isAnyRecovery) {
-      // Recovery week after or between peaks — 65% of max, min 40% of race dist
-      longKm = Math.max(minRecovery, Math.round(maxLong * 0.65));
-    } else if (isTaper) {
-      longKm = taperWkIdx <= 1 ? Math.round(maxLong * 0.60) : Math.round(maxLong * 0.38);
-    } else if (isDown) {
-      longKm = Math.max(minRecovery, Math.round((distNum * 0.40 + pct * distNum * 0.15) * gm));
-    } else {
-      longKm = Math.round((Math.max(distNum * 0.35, 8) + pct * (maxLong - Math.max(distNum * 0.35, 8))) * gm);
-    }
-    longKm = Math.max(isDown ? minRecovery : 6, Math.min(maxLong, longKm + (isDown ? 0 : Math.round(fbAdj))));
-
-    // ── Build each day from dayPlan ─────────────────────────
-    const sessions = {};
-    let workoutSlotIdx = 0; // increments each time a "workout" slot is assigned in this week
-    DAYS.forEach(d => {
-      const slot = normaliseSlot(dayPlan[d.id]);
-      sessions[d.id] = buildSlot(slot, W, {
-        wn, dayId: d.id,
-        slotIdx: primarySlot(slot) === "workout" ? workoutSlotIdx : 0,
-        isDown, isTaper, taperWkIdx, isPeakLong, isTrail, paces,
-        profile, event, longKm, phase,
-      });
-      if (primarySlot(slot) === "workout") workoutSlotIdx++;
-    });
-
-    const totalKm = Math.round(
-      DAYS.reduce((sum, d) => sum + (sessions[d.id]?.distance || 0), 0)
-    );
-
-    // Week label: "Build" normally, "Down" for recovery weeks, labelled for peak
-    const weekLabel = isPeakLong    ? "Peak Long Run"
-      : isPostPeakDown               ? "Recovery Week"
-      : isInterPeakDown              ? "Down Week"
-      : isDown                       ? "Down Week"
-      : isTaper                      ? "Taper"
-      : "Build";
-
-    const note = isPostPeakDown
-      ? "⬇ Recovery week — you just did a peak long run. Shorter long run, protect the legs before the next big effort."
-      : isInterPeakDown
-      ? "⬇ Down week — shorter long run between peaks. Let the big efforts absorb."
-      : isDown
-      ? "⬇ Down week — protect the gains."
-      : isTaper && taperWkIdx === 1
-      ? "📉 Taper begins — volume drops but intensity stays."
-      : isTaper && taperWkIdx >= 2
-      ? "📉 Final taper — legs should feel restless. That's the point."
-      : isPeakLong
-      ? "⭐ Peak long run — confidence-builder. Time on feet, conversational pace."
-      : "";
-
-    const longSession = Object.values(sessions).find(s => s?.wtype === "long");
-    return {
-      weekNum: wn, phase, startDate, isDown, isPeakLong, isPostPeakDown, weekLabel,
-      sessions, totalKm, note,
-      longRunMins: longSession?.estMins || 0,
-    };
-  });
-
-  // 10% rule check — flag weeks where volume jumps >10% vs the prior comparable week.
-  // Skipped for down/taper/race (a volume drop there is intentional).
-  const checked = [];
-  for (let i = 0; i < weeks.length; i++) {
-    const week = weeks[i];
-    let volumeWarning = null;
-    if (!week.isDown && week.phase !== "TAPER" && week.phase !== "RACE" && i > 0) {
-      let prevKm = null;
-      for (let j = i - 1; j >= 0; j--) {
-        if (!weeks[j].isDown && weeks[j].phase !== "TAPER" && weeks[j].phase !== "RACE") {
-          prevKm = weeks[j].totalKm; break;
-        }
-      }
-      if (prevKm && prevKm > 0) {
-        const pctIncrease = (week.totalKm - prevKm) / prevKm;
-        if (pctIncrease > 0.10) {
-          volumeWarning = { pct: Math.round(pctIncrease * 100), prevKm, thisKm: week.totalKm };
-        }
-      }
-    }
-    checked.push({ ...week, volumeWarning });
-  }
-  return checked;
-}
 
 // Build a single day's session based on the slot type.
 // slotIdx: counts how many "workout" slots have already been assigned this week
 //          so two workout days get different sessions (0 = first, 1 = second)
-function buildSlot(slots, W, ctx) {
-  const slotArr     = normaliseSlot(slots);
-  const primary     = primarySlot(slotArr);
-  const addStrength = hasStrength(slotArr) && primary !== "rest" && primary !== "strength";
-
-  const { wn, dayId, slotIdx, isDown, isTaper, taperWkIdx, isPeakLong,
-          isTrail, paces, profile, event, longKm, phase, forcedSubtype } = ctx;
-  const isBroniesDay = dayId === "wed" || dayId === "fri";
-
-  let session;
-
-  if (primary === "rest") return W.rest();
-
-  if (primary === "bronies") {
-    session = W.bronieRun();
-  } else if (primary === "strength") {
-    return {
-      wtype:"rest", label:"Strength Training 🏋", distance:0, estMins:0,
-      summary:"Chat to the Bronies about what you SHOULD be doing",
-      detail:"Strength & conditioning day.\n\nChat to the Bronies about what you SHOULD be doing — they'll have opinions.\n\nFocus on single-leg stability, hip strength, and core work to keep you injury-free.",
-      garmin:["No running today — strength session.", "Ask a Bronie what to do."],
-    };
-  } else if (primary === "easy") {
-    if (isTaper && taperWkIdx >= 2) {
-      session = { ...W.easyRun(30, true), label:"Easy + Strides", summary:"30min easy + 4 strides — wake the legs" };
-    } else {
-      // Add strides to Tue/Thu easy runs in BUILD and PEAK — Daniels/Pfitzinger standard.
-      const STRIDE_DAYS = ["tue", "thu"];
-      const withStrides = !isDown
-        && (phase === "BUILD" || phase === "PEAK")
-        && STRIDE_DAYS.includes(dayId);
-      session = W.easyRun(isDown ? 35 : 40, withStrides);
-    }
-  } else if (primary === "long") {
-    if (isPeakLong && !isTrail && (event?.goalTime)) {
-      session = W.longPaceBlocks(longKm, paces.ep, paces.mp);
-    } else {
-      session = W.longEasy(longKm, isTrail, paces.ep);
-    }
-  } else if (isWorkoutSlot(primary)) {
-    if (isTaper && taperWkIdx === 1) {
-      session = { ...W.tempo(15), label:"Taper Maintenance Tempo",
-        summary:"WU 2km · 15min tempo · CD 2km — stay sharp" };
-    } else if (isTaper && taperWkIdx >= 2) {
-      session = { ...W.easyRun(30, true), label:"Easy + 3 Fast Strides",
-        summary:"30min easy + 3×1min fast — final tune-up" };
-    } else {
-      // forcedSubtype (from user swap) wins; else a workout-subtype day name forces that type.
-      // targetMins from profile.workoutMinutes lets users set longer Monday workouts (e.g. 60-90min)
-      // vs shorter Wednesday workouts (e.g. 45min) so they can still meet the crew for coffee.
-      const targetMins = profile?.workoutMinutes?.[dayId] || 45;
-      session = pickWorkout(W, wn, dayId, slotIdx, isTrail,
-        profile?.hillAccess || "some hills", isDown,
-        forcedSubtype || (WORKOUT_SUBTYPES.includes(primary) ? primary : null),
-        phase, targetMins);
-    }
-  } else {
-    session = W.rest();
-  }
-
-  // Append strength note when combined with a run
-  if (addStrength) {
-    session = {
-      ...session,
-      label: session.label + " + Strength 🏋",
-      detail: (session.detail || "")
-        + "\n\n──────────────────\n🏋 Strength Training (after your run)\nChat to the Bronies about what you SHOULD be doing — hip strength, single-leg stability, core.",
-    };
-  }
-
-  // If a workout (or easy/long) lands on a BRONIES social day, keep the social bookends.
-  // The crew meets at the start, runs the session, then regroups for coffee.
-  if (isBroniesDay && session && session.wtype !== "rest" && primary !== "bronies") {
-    session = {
-      ...session,
-      label: "☕ " + session.label,
-      detail: (session.detail || "")
-        + "\n\n──────────────────\n☕ BRONIES social day\nMeet the crew at the usual spot, warm up together, then run your session. Regroup at the end for coffee. The work gets done — the .99 chaos stays intact.",
-    };
-  }
-
-  return session;
-}
 
 
 // ─────────────────────────────────────────────────────────────
@@ -1609,221 +574,6 @@ function buildSlot(slots, W, ctx) {
 // ─────────────────────────────────────────────────────────────
 
 // Map the "how far now" bucket to a usable starting km
-function parseCurrentKm(currentLongest) {
-  const map = {
-    "0-1":  0.5,
-    "1-3":  2,
-    "3-5":  4,
-    "5-8":  6,
-    "8+":   8,
-  };
-  return map[currentLongest] || 1;
-}
-
-// Map targetDistance field to km
-function parseTargetKm(targetDistance, targetDistanceKm) {
-  // Free-form number takes priority
-  const manual = parseFloat(targetDistanceKm);
-  if (!isNaN(manual) && manual > 0) return manual;
-  // Preset labels
-  const map = {
-    parkrun:    5,
-    brownie:    7.99,
-    "10k":      10,
-    city2surf:  14,
-    half:       21,
-  };
-  return map[targetDistance] || 5;
-}
-
-// Map timeline to weeks
-function parseTimeline(timeline) {
-  const map = { "8w": 8, "12w": 12, "16w": 16, "open": 16 };
-  return map[timeline] || 12;
-}
-
-// Generate a single beginner session for a given week.
-// runKm: the target distance for this session.
-// pct:   progress through the plan (0→1). Used to decide walk/run vs continuous.
-// freq:  runs/week (used for labelling).
-function buildBeginnerSession(runKm, pct, ep, isFirst) {
-  const isWalkRun = pct < 0.4;   // first 40% of plan uses walk/run
-  const d = Math.round(runKm * 10) / 10;
-
-  if (isWalkRun) {
-    // Walk/run structure — intervals described explicitly
-    // Early (pct < 0.2): 1min run / 2min walk
-    // Mid-early (0.2–0.4): 2min run / 1min walk
-    const runMin  = pct < 0.2 ? 1 : 2;
-    const walkMin = pct < 0.2 ? 2 : 1;
-    const totalMin = Math.round((d / (ep / 60 / 1000)) / 60 * 1.4); // approx with walk overhead
-    const estKm = d;
-    return {
-      wtype: "easy",
-      label: `${d}km Walk/Run`,
-      distance: d,
-      estMins: Math.round(totalMin),
-      summary: `${runMin}min run / ${walkMin}min walk — repeat for ~${d}km · walk any time you need`,
-      detail:
-        `Warm up: 5min easy walk.\n\n` +
-        `Main set: alternate ${runMin}min running and ${walkMin}min walking for ~${d}km.\n` +
-        `Don't worry about pace — if you can say short sentences while running, you're going the right speed.\n\n` +
-        `Walk whenever you need to. That's not quitting — it's how this works.\n\n` +
-        `Cool down: 5min easy walk.\n\n` +
-        `✓ Did it? Tick it off. That's a win.`,
-      garmin: [
-        `WARM UP — Time: 5:00 | Easy walk`,
-        `REPEAT until ${d}km covered:`,
-        `  RUN  — Time: ${runMin}:00 | Easy jog, conversational`,
-        `  WALK — Time: ${walkMin}:00 | Recovery walk`,
-        `COOL DOWN — Time: 5:00 | Easy walk`,
-      ],
-    };
-  }
-
-  // Continuous run — simple and easy
-  const mins = Math.round((d * ep) / 60);
-  return {
-    wtype: "easy",
-    label: `${d}km Easy Run`,
-    distance: d,
-    estMins: mins,
-    summary: `${d}km easy · est. ${fmtDuration(mins)} · conversational pace`,
-    detail:
-      `${d}km easy run at a comfortable, conversational pace.\n\n` +
-      `If you can't say short sentences, slow down. If it feels too easy, good — that's the point right now.\n\n` +
-      (pct > 0.8
-        ? `This is one of your goal-distance runs. You've earned it. Trust the training you've put in.\n\n`
-        : `Walk for 30–60 seconds any time you need to — this isn't weakness, it's smart training.\n\n`) +
-      `Finish line: ${d}km. Every metre counts.`,
-    garmin: [
-      `Distance: ${d}km | No pace target — run to feel`,
-      `Auto Lap every 1km`,
-      `Zone 1–2 only — if breathing is hard, slow down`,
-    ],
-  };
-}
-
-function buildOngoingPlan(profile, dayPlan, fb) {
-  const planAnchor = profile.planStartDate || todaySydney();
-  const isHealthy   = profile.trainingGoal === "healthier";
-  const isHangout   = profile.trainingGoal === "hangout";
-
-  // Hangout: simple rolling 8-week plan, BRONIES days as selected
-  if (isHangout || !isHealthy) {
-    const paces = derivePaces(profile);
-    const W = makeW(paces);
-    return Array.from({ length: 8 }, (_, i) => {
-      const wn = i + 1;
-      const sessions = {};
-      let workoutSlotIdx = 0;
-      DAYS.forEach(d => {
-        const slot = normaliseSlot(dayPlan[d.id]);
-        sessions[d.id] = buildSlot(slot, W, {
-          wn, dayId: d.id,
-          slotIdx: primarySlot(slot) === "workout" ? workoutSlotIdx : 0,
-          isDown:false, isTaper:false, taperWkIdx:0, isPeakLong:false,
-          isTrail:false, paces, profile, event:null,
-          longKm: 10, phase:"BUILD",
-        });
-        if (primarySlot(slot) === "workout") workoutSlotIdx++;
-      });
-      const totalKm = Math.round(DAYS.reduce((s, d) => s + (sessions[d.id]?.distance || 0), 0));
-      return {
-        weekNum: wn, phase:"BASE", startDate: dateFromAnchor(planAnchor, i),
-        isDown:false, isPeakLong:false, isOngoing:true,
-        sessions, totalKm,
-        longRunMins: Object.values(sessions).find(s => s?.wtype === "long")?.estMins || 0,
-        note: "",
-      };
-    });
-  }
-
-  // ── Beginner progressive plan ────────────────────────────
-  const startKm  = parseCurrentKm(profile.currentLongest);
-  const goalKm   = parseTargetKm(profile.targetDistance, profile.targetDistanceKm);
-  const weeks    = parseTimeline(profile.timeline);
-  const freq     = profile.healthyFreq || 3;
-
-  // Use a simple pace — if no reference time, assume 8:00/km (480 sec/km) as a gentle jog
-  const ep = (() => {
-    const paces = derivePaces(profile);
-    // Clamp to a range appropriate for beginners — never faster than 5:30 or slower than 9:00
-    return Math.max(330, Math.min(540, paces.ep));
-  })();
-
-  // Build week-by-week session distances.
-  // Strategy: linear ramp from startKm to goalKm, with a small dip in the 3rd week
-  // (recovery week) and the final two weeks at or near goal distance.
-  // Never increase any single session by more than 1.5km at a time.
-
-  // Sessions per week: based on freq. Distribute as: short / medium / slightly longer
-  // e.g. freq=3: [0.7, 0.85, 1.0] × weekTargetKm
-  const sessionRatios = freq === 2 ? [0.85, 1.0]
-                      : freq === 3 ? [0.7, 0.85, 1.0]
-                      : freq === 4 ? [0.6, 0.8, 0.9, 1.0]
-                      : [0.55, 0.7, 0.8, 0.9, 1.0]; // 5x
-
-  return Array.from({ length: weeks }, (_, i) => {
-    const wn  = i + 1;
-    const pct = wn / weeks; // 0→1 progress through the plan
-
-    // Target session distance this week (the "longest" session)
-    // Linear ramp: startKm in week 1, goalKm in the last two weeks
-    const rampProgress = Math.min(1, (wn - 1) / Math.max(1, weeks - 2));
-    let peakSessionKm  = startKm + rampProgress * (goalKm - startKm);
-
-    // Recovery week every 3rd week — pull back to 80% of previous week's peak
-    const isDown = wn % 3 === 0 && wn < weeks - 1;
-    if (isDown) peakSessionKm = Math.max(startKm, peakSessionKm * 0.8);
-
-    // Clamp to a sensible max increase per week (no more than 1.5km above last session)
-    peakSessionKm = Math.min(goalKm, peakSessionKm);
-    peakSessionKm = Math.round(peakSessionKm * 10) / 10;
-
-    // Build sessions for this week — only on run days (those marked as any non-rest slot)
-    const runDays  = DAYS.filter(d => {
-      const slot = normaliseSlot(dayPlan[d.id]);
-      return primarySlot(slot) !== "rest";
-    });
-
-    // Use the user's selected days, capped to freq
-    const activeDays = runDays.slice(0, freq);
-
-    const sessions = {};
-    DAYS.forEach(d => { sessions[d.id] = { wtype:"rest", label:"Rest Day", distance:0, estMins:0,
-      summary:"Complete rest", detail:"Full rest. Sleep, eat well, hydrate.",
-      garmin:["No workout today."] }; });
-
-    activeDays.forEach((d, idx) => {
-      const ratio  = sessionRatios[idx] ?? 1.0;
-      const sessKm = Math.max(0.5, Math.round(peakSessionKm * ratio * 10) / 10);
-      sessions[d.id] = buildBeginnerSession(sessKm, pct, ep, wn === 1 && idx === 0);
-    });
-
-    const totalKm = Math.round(
-      DAYS.reduce((sum, d) => sum + (sessions[d.id]?.distance || 0), 0) * 10) / 10;
-
-    const isGoalWeek = wn >= weeks - 1;
-    const note = wn === 1
-      ? "🌱 Week 1 — start where you are. Walk any time you need to. Finishing is the whole goal."
-      : isDown
-      ? "⬇ Easy week — lighter load, let your body absorb the training. Don't skip it."
-      : isGoalWeek
-      ? `🎯 Goal week — you're running ${goalKm}km. This is what all those weeks were for.`
-      : pct > 0.6
-      ? "💪 The runs are getting longer. You've already done the hard part — keep going."
-      : "";
-
-    return {
-      weekNum: wn, phase: "BASE", startDate: dateFromAnchor(planAnchor, i),
-      isDown, isPeakLong: isGoalWeek,
-      sessions, totalKm,
-      longRunMins: 0,
-      note,
-    };
-  });
-}
 
 // ─────────────────────────────────────────────────────────────
 //  GARMIN JSON GENERATOR
@@ -2224,9 +974,10 @@ function GarminBlock({ session, paces }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Session card
 // ─────────────────────────────────────────────────────────────
-function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, isToday, completionKey, completionMap, onCompletion, weekSessions }) {
+function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, paces, isPast, isToday, completionKey, completionMap, onCompletion, weekSessions }) {
   const [open, setOpen]             = useState(false);
   const [editing, setEditing]       = useState(false);
+  const [showMovePanel, setShowMovePanel] = useState(false);
   const [draftDist, setDraftDist]   = useState("");
   const [draftNotes, setDraftNotes] = useState("");
   const [draftReps, setDraftReps]   = useState(null); // rep-count override (null = not editing reps)
@@ -2408,8 +1159,12 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
                             return (
                               <button key={d.id}
                                 onClick={() => {
-                                  onDaySlotChange(dayId, ms);
-                                  onDaySlotChange(d.id, "rest");
+                                  if (onSwapDays) {
+                                    onSwapDays(dayId, ms, d.id, "rest");
+                                  } else {
+                                    onDaySlotChange(dayId, ms);
+                                    onDaySlotChange(d.id, "rest");
+                                  }
                                   setOpen(false);
                                 }}
                                 style={{padding:"5px 8px",fontSize:11,fontWeight:600,
@@ -2621,6 +1376,78 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, paces, isPast, i
 
                     </div>
                   )}
+
+                  {/* ── Move to another day ─────────────────────────────── */}
+                  {onDaySlotChange && weekSessions && !isRace && (
+                    <div style={{marginTop:14,borderTop:"1px solid var(--rule)",paddingTop:12}}>
+                      <button
+                        onClick={() => setShowMovePanel(v => !v)}
+                        style={{fontSize:11,fontWeight:700,color:"var(--ink3)",background:"none",
+                          border:"1px solid var(--rule)",borderRadius:"var(--r)",
+                          padding:"5px 10px",cursor:"pointer",letterSpacing:.4,
+                          textTransform:"uppercase",display:"flex",alignItems:"center",gap:5}}>
+                        ↕ Move to another day {showMovePanel ? "▲" : "▼"}
+                      </button>
+                      {showMovePanel && (() => {
+                        // All other days in the week, excluding race days and this day
+                        const otherDays = DAYS.filter(d =>
+                          d.id !== dayId && weekSessions[d.id]?.wtype !== "race"
+                        );
+                        return (
+                          <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
+                            <div style={{fontSize:11,color:"var(--ink4)",marginBottom:2}}>
+                              Tap a day to swap — this session moves there and that session comes here.
+                            </div>
+                            {otherDays.map(d => {
+                              const other = weekSessions[d.id];
+                              const otherLabel = other?.wtype === "rest" && (other?.label || "").includes("Strength")
+                                ? "Strength" : other?.label || "Rest";
+                              const otherIcon = other?.wtype === "rest" && (other?.label || "").includes("Strength")
+                                ? "🏋" : SLOT_TYPES[other?.wtype]?.icon || "💤";
+                              return (
+                                <button key={d.id}
+                                  onClick={() => {
+                                    // Map a live session back to the slot key used by the engine.
+                                    // isWorkoutSlot() handles all workout subtypes so this stays
+                                    // correct when new session types are added to the engine.
+                                    const sessionToSlot = (s) =>
+                                      isWorkoutSlot(s?.wtype) ? "workout"
+                                      : s?.wtype === "rest" && (s?.label || "").includes("Strength") ? "strength"
+                                      : s?.wtype || "rest";
+                                    const thisSlot  = sessionToSlot(session);
+                                    const otherSlot = sessionToSlot(other);
+                                    if (onSwapDays) {
+                                      onSwapDays(dayId, otherSlot, d.id, thisSlot);
+                                    } else {
+                                      // Fallback — should not be reached but kept for safety
+                                      onDaySlotChange(dayId, otherSlot);
+                                      onDaySlotChange(d.id, thisSlot);
+                                    }
+                                    setShowMovePanel(false);
+                                    setOpen(false);
+                                  }}
+                                  style={{display:"flex",alignItems:"center",gap:8,
+                                    padding:"8px 12px",fontSize:12,fontWeight:600,
+                                    borderRadius:"var(--r)",border:"1px solid var(--rule)",
+                                    background:"var(--surface)",cursor:"pointer",
+                                    color:"var(--ink2)",textAlign:"left",width:"100%",
+                                    transition:"background .15s"}}
+                                  onMouseEnter={e => e.currentTarget.style.background="var(--rule)"}
+                                  onMouseLeave={e => e.currentTarget.style.background="var(--surface)"}>
+                                  <span style={{fontFamily:"var(--mono)",fontSize:10,fontWeight:700,
+                                    color:"var(--ink3)",minWidth:28,textTransform:"uppercase"}}>
+                                    {d.short}
+                                  </span>
+                                  <span style={{flex:1}}>{otherIcon} {otherLabel}</span>
+                                  <span style={{fontSize:10,color:"var(--ink4)"}}>↔ swap</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </>
               ) : (!isRest && editing ? (
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -2746,7 +1573,7 @@ function WeeklyFeedback({ weekNum, existing, onSave }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Week detail modal
 // ─────────────────────────────────────────────────────────────
-function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, onClose, paces, completionMap, onCompletion }) {
+function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, feedbackMap, onClose, paces, completionMap, onCompletion }) {
   const ph = PHASES[week.phase] || PHASES.BASE;
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:200,
@@ -2781,7 +1608,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
             </div>
           </div>
           <div style={{textAlign:"right"}}>
-            <div style={{fontSize:22,fontWeight:700,color:"var(--accent)"}}>{week.totalKm}km</div>
+            <div style={{fontSize:22,fontWeight:700,color:"var(--accent)"}}>{week.totalKm || 0}km</div>
             {week.longRunMins > 0 && (
               <div style={{fontSize:11,color:"var(--ink4)"}}>long run ≈{fmtDuration(week.longRunMins)}</div>
             )}
@@ -2811,7 +1638,8 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onFeedback, feedbackMap, on
             completionMap={completionMap}
             onCompletion={onCompletion}
             onEdit={(dayId, changes) => onEdit && onEdit(week.weekNum, dayId, changes)}
-            onDaySlotChange={(dayId, slot, subtype) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot, subtype)}/>
+            onDaySlotChange={(dayId, slot, subtype) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot, subtype)}
+            onSwapDays={(dayIdA, slotA, dayIdB, slotB) => onSwapDays && onSwapDays(week.weekNum, dayIdA, slotA, dayIdB, slotB)}/>
         ))}
         {!week.isRaceWeek && (
           <WeeklyFeedback weekNum={week.weekNum} existing={feedbackMap[week.weekNum]} onSave={onFeedback}/>
@@ -3078,7 +1906,7 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                 <div style={{textAlign:"right",flexShrink:0}}>
                   <div style={{fontSize:13,fontWeight:700,
                     color:isCurrent?"var(--accent)":isRace?"var(--accent)":"var(--ink)",
-                    textDecoration:isPast?"line-through":"none"}}>{w.totalKm}km</div>
+                    textDecoration:isPast?"line-through":"none"}}>{w.totalKm || 0}km</div>
                 </div>
                 <span style={{color:"var(--ink4)",fontSize:11}}>›</span>
               </div>
@@ -3912,6 +2740,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       currentLongest:"", targetDistance:"", targetDistanceKm:"", timeline:"",
       healthyFreq: 3,
       dayPlan: DEFAULT_DAY_PLAN,
+      workoutMinutes: DEFAULT_WORKOUT_MINUTES,
       trailAccess:"mix of trail & road", hillAccess:"some hills", injuryHistory:"none",
       ...init,
       event: { ...DEFAULT_EVENT, ...eventInit },
@@ -3940,11 +2769,12 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       trailAccess: data.trailAccess,
       hillAccess: data.hillAccess,
       injuryHistory: data.injuryHistory,
+      workoutMinutes: data.workoutMinutes,
     };
     onComplete(profile, isEvent ? data.event : null);
   }
 
-  const totalSteps = isHangout ? 2 : isFitness ? 4 : 5;
+  const totalSteps = isHangout ? 2 : isFitness ? 4 : 6;
   const canNext = (() => {
     if (step === 1) return !!data.trainingGoal;
     if (step === 2) {
@@ -4399,7 +3229,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
         </div>
       )}
 
-      {/* STEP 4: Days + slot types — event branch only */}
+      {/* STEP 4 (event): Training days */}
       {step === 4 && isEvent && (() => {
         const eventDistKm = parseFloat(data.event?.distance) || 0;
         const isUltra = eventDistKm >= 50;
@@ -4448,7 +3278,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
         );
       })()}
 
-      {/* STEP 4: Days for fitness branch (simpler — auto-distribute by frequency) */}
+      {/* STEP 4 (fitness): Training days */}
       {step === 4 && isFitness && (
         <div>
           <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
@@ -4461,8 +3291,8 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
         </div>
       )}
 
-      {/* STEP 5: Event branch only — context */}
-      {step === 5 && isEvent && (
+      {/* STEP 6 (event): Final touches */}
+      {step === 6 && isEvent && (
         <div>
           <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Final touches
@@ -4498,6 +3328,124 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
           </div>
         </div>
       )}
+
+
+      {/* STEP 5 (event): Workout duration */}
+      {step === 5 && isEvent && (() => {
+        const workoutDays = DAYS.filter(d => {
+          const slot = primarySlot(normaliseSlot(data.dayPlan?.[d.id]));
+          return isWorkoutSlot(slot);
+        });
+        const mins = data.workoutMinutes || DEFAULT_WORKOUT_MINUTES;
+        return (
+          <div>
+            <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
+              Workout duration
+            </div>
+            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:6,fontStyle:"italic"}}>
+              Set how long each workout day should run. Different days can have different durations —
+              longer = more reps and a bigger stimulus.
+            </div>
+            <div style={{fontSize:12,color:"var(--ink4)",marginBottom:20}}>
+              45min is the standard. 90min is a big day.
+            </div>
+            {workoutDays.length === 0 ? (
+              <div style={{padding:"16px",background:"var(--surface)",borderRadius:"var(--r)",
+                fontSize:13,color:"var(--ink3)",textAlign:"center"}}>
+                No workout days set — go back and assign at least one day as Workout to adjust duration.
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {workoutDays.map(d => {
+                  const current = mins[d.id] || 45;
+                  return (
+                    <div key={d.id} style={{padding:"12px 14px",background:"var(--surface)",
+                      borderRadius:"var(--r)",border:"1px solid var(--rule)"}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",
+                        letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>
+                        {d.label}
+                      </div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {[45, 60, 75, 90].map(opt => (
+                          <button key={opt}
+                            onClick={() => up("workoutMinutes", { ...mins, [d.id]: opt })}
+                            style={{padding:"8px 14px",fontSize:13,fontWeight:700,
+                              borderRadius:"var(--r)",cursor:"pointer",
+                              border:`2px solid ${current===opt?"var(--ink)":"var(--rule)"}`,
+                              background:current===opt?"var(--ink)":"white",
+                              color:current===opt?"white":"var(--ink3)",
+                              transition:"all .15s"}}>
+                            {opt}min
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+
+      {/* STEP 5 (fitness): Workout duration */}
+      {step === 5 && isFitness && !isHealth && (() => {
+        const workoutDays = DAYS.filter(d => {
+          const slot = primarySlot(normaliseSlot(data.dayPlan?.[d.id]));
+          return isWorkoutSlot(slot);
+        });
+        const mins = data.workoutMinutes || DEFAULT_WORKOUT_MINUTES;
+        return (
+          <div>
+            <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
+              Workout duration
+            </div>
+            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:6,fontStyle:"italic"}}>
+              Set how long each workout day should run. Different days can have different durations —
+              longer = more reps and a bigger stimulus.
+            </div>
+            <div style={{fontSize:12,color:"var(--ink4)",marginBottom:20}}>
+              45min is the standard. 90min is a big day.
+            </div>
+            {workoutDays.length === 0 ? (
+              <div style={{padding:"16px",background:"var(--surface)",borderRadius:"var(--r)",
+                fontSize:13,color:"var(--ink3)",textAlign:"center"}}>
+                No workout days set — go back and assign at least one day as Workout to adjust duration.
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {workoutDays.map(d => {
+                  const current = mins[d.id] || 45;
+                  return (
+                    <div key={d.id} style={{padding:"12px 14px",background:"var(--surface)",
+                      borderRadius:"var(--r)",border:"1px solid var(--rule)"}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",
+                        letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>
+                        {d.label}
+                      </div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {[45, 60, 75, 90].map(opt => (
+                          <button key={opt}
+                            onClick={() => up("workoutMinutes", { ...mins, [d.id]: opt })}
+                            style={{padding:"8px 14px",fontSize:13,fontWeight:700,
+                              borderRadius:"var(--r)",cursor:"pointer",
+                              border:`2px solid ${current===opt?"var(--ink)":"var(--rule)"}`,
+                              background:current===opt?"var(--ink)":"white",
+                              color:current===opt?"white":"var(--ink3)",
+                              transition:"all .15s"}}>
+                            {opt}min
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Nav buttons */}
       <div style={{display:"flex",gap:10,marginTop:28}}>
@@ -4600,8 +3548,552 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Header
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  RACE DAY SCREEN
+//  Session 2: Course setup + fuel inventory (input half).
+//  Session 3 will add the plan output section below the inputs.
+// ─────────────────────────────────────────────────────────────
+
+function RaceDayScreen({ racePlan, onChange }) {
+  const { race = { title:"", date:"", legs:[] }, strategy = DEFAULT_STRATEGY } = racePlan || {};
+
+  // ── helpers ──────────────────────────────────────────────
+  function updateRace(patch) {
+    onChange({ ...racePlan, race: { ...race, ...patch } });
+  }
+  function updateStrategy(patch) {
+    onChange({ ...racePlan, strategy: { ...strategy, ...patch } });
+  }
+
+  // ── leg CRUD ─────────────────────────────────────────────
+  function addLeg() {
+    const legs = [...(race.legs || []), { ...DEFAULT_LEG, name: `Leg ${(race.legs || []).length + 1}` }];
+    updateRace({ legs });
+  }
+  function updateLeg(i, patch) {
+    const legs = (race.legs || []).map((l, idx) => idx === i ? { ...l, ...patch } : l);
+    updateRace({ legs });
+  }
+  function removeLeg(i) {
+    const legs = (race.legs || []).filter((_, idx) => idx !== i);
+    updateRace({ legs });
+  }
+  function moveLeg(i, dir) {
+    const legs = [...(race.legs || [])];
+    const j = i + dir;
+    if (j < 0 || j >= legs.length) return;
+    [legs[i], legs[j]] = [legs[j], legs[i]];
+    updateRace({ legs });
+  }
+
+  // ── fuel inventory CRUD ──────────────────────────────────
+  const [fuelPreset,   setFuelPreset]   = useState("");
+  const [customName,   setCustomName]   = useState("");
+  const [customCarbs,  setCustomCarbs]  = useState("");
+
+  function addPreset() {
+    if (!fuelPreset) return;
+    const carbs = FUEL_LOOKUP[fuelPreset];
+    if (!carbs) return;
+    const inv = [...(strategy.fuelInventory || []), { name: fuelPreset, carbs }];
+    updateStrategy({ fuelInventory: inv });
+    setFuelPreset("");
+  }
+  function addCustom() {
+    const c = parseInt(customCarbs, 10);
+    if (!customName.trim() || !c || c <= 0) return;
+    const inv = [...(strategy.fuelInventory || []), { name: customName.trim(), carbs: c }];
+    updateStrategy({ fuelInventory: inv });
+    setCustomName(""); setCustomCarbs("");
+  }
+  function removeFuel(i) {
+    const inv = (strategy.fuelInventory || []).filter((_, idx) => idx !== i);
+    updateStrategy({ fuelInventory: inv });
+  }
+
+  // ── derived totals ────────────────────────────────────────
+  const validLegs    = (race.legs || []).filter(l => l.km > 0);
+  const totalDistKm  = validLegs.reduce((a, l) => a + (parseFloat(l.km) || 0), 0);
+  const totalAscentM = validLegs.reduce((a, l) => a + (parseInt(l.gainM, 10) || 0), 0);
+
+  // ── target time helpers ───────────────────────────────────
+  const targetH   = Math.floor(strategy.targetHours || 0);
+  const targetMin = Math.round(((strategy.targetHours || 0) - targetH) * 60);
+
+  function setTargetTime(h, m) {
+    updateStrategy({ targetHours: (parseInt(h, 10) || 0) + (parseInt(m, 10) || 0) / 60 });
+  }
+
+  const PRESET_OPTIONS = Object.keys(FUEL_LOOKUP);
+
+  return (
+    <div style={{ padding: "var(--pad-x)", paddingBottom: 40 }}>
+
+      {/* ── Page title ── */}
+      <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
+        Race Day
+      </div>
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:20 }}>
+        Build your course, load your vest, get your plan.
+      </div>
+
+      {/* ══ SECTION 1: Course Setup ══════════════════════════ */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:10 }}>
+        Course Setup
+      </div>
+
+      {/* Event title + date + weather in a card */}
+      <div className="card" style={{ padding:16, marginBottom:12 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+          <div style={{ gridColumn:"1 / -1" }}>
+            <label className="lbl">Event name</label>
+            <input className="inp" placeholder="e.g. Elephant Trail Race"
+              value={race.title || ""}
+              onChange={e => updateRace({ title: e.target.value })} />
+          </div>
+          <div>
+            <label className="lbl">Race date</label>
+            <input className="inp" type="date"
+              value={race.date || ""}
+              onChange={e => updateRace({ date: e.target.value })} />
+          </div>
+          <div>
+            <label className="lbl">Target time</label>
+            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+              <input className="inp" type="number" min="0" max="99" placeholder="h"
+                style={{ textAlign:"center" }}
+                value={targetH}
+                onChange={e => setTargetTime(e.target.value, targetMin)} />
+              <span style={{ color:"var(--ink3)", fontWeight:700, flexShrink:0 }}>h</span>
+              <input className="inp" type="number" min="0" max="59" placeholder="min"
+                style={{ textAlign:"center" }}
+                value={targetMin}
+                onChange={e => setTargetTime(targetH, e.target.value)} />
+              <span style={{ color:"var(--ink3)", fontWeight:700, flexShrink:0 }}>min</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Weather toggle */}
+        <label className="lbl">Conditions</label>
+        <div style={{ display:"flex", gap:8 }}>
+          {[
+            { value:"clear", label:"☀ Clear",  desc:"Normal kit" },
+            { value:"storm", label:"⛈ Storm",  desc:"Full wet weather" },
+          ].map(opt => (
+            <button key={opt.value}
+              onClick={() => updateStrategy({ conditions: opt.value })}
+              style={{
+                flex:1, padding:"10px 12px", borderRadius:"var(--r)", cursor:"pointer",
+                border:`2px solid ${strategy.conditions === opt.value ? "var(--ink)" : "var(--rule)"}`,
+                background: strategy.conditions === opt.value ? "var(--ink)" : "var(--white)",
+                color: strategy.conditions === opt.value ? "#fff" : "var(--ink3)",
+                fontWeight:700, fontSize:13, transition:"all .15s", textAlign:"left",
+              }}>
+              <div>{opt.label}</div>
+              <div style={{ fontSize:10, fontWeight:400, opacity:.7, marginTop:2 }}>{opt.desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Totals pill */}
+      {validLegs.length > 0 && (
+        <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+          <div style={{ flex:1, background:"var(--gold-pale)", border:"1px solid var(--gold-dark)",
+            borderRadius:"var(--r)", padding:"8px 12px", textAlign:"center" }}>
+            <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color:"var(--gold-dark)", lineHeight:1 }}>
+              {totalDistKm.toFixed(1)}
+            </div>
+            <div style={{ fontSize:10, color:"var(--gold-dark)", fontWeight:600,
+              textTransform:"uppercase", letterSpacing:.5, marginTop:2 }}>km total</div>
+          </div>
+          <div style={{ flex:1, background:"var(--accent-light)", border:"1px solid var(--accent)",
+            borderRadius:"var(--r)", padding:"8px 12px", textAlign:"center" }}>
+            <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color:"var(--accent)", lineHeight:1 }}>
+              {totalAscentM.toLocaleString()}
+            </div>
+            <div style={{ fontSize:10, color:"var(--accent)", fontWeight:600,
+              textTransform:"uppercase", letterSpacing:.5, marginTop:2 }}>m ascent</div>
+          </div>
+        </div>
+      )}
+
+      {/* Leg cards */}
+      {(race.legs || []).map((leg, i) => (
+        <div key={i} className="card card-l" style={{ padding:14, marginBottom:10 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+            marginBottom:10 }}>
+            <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700,
+              color:"var(--accent)", textTransform:"uppercase", letterSpacing:.5 }}>
+              Leg {i + 1}
+            </div>
+            <div style={{ display:"flex", gap:6 }}>
+              {i > 0 && (
+                <button className="btn btn-g btn-sm" onClick={() => moveLeg(i, -1)} title="Move up">↑</button>
+              )}
+              {i < (race.legs || []).length - 1 && (
+                <button className="btn btn-g btn-sm" onClick={() => moveLeg(i, 1)} title="Move down">↓</button>
+              )}
+              <button className="btn btn-g btn-sm" onClick={() => removeLeg(i)}
+                style={{ color:"var(--warn)" }}>✕</button>
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <div style={{ gridColumn:"1 / -1" }}>
+              <label className="lbl">Checkpoint name</label>
+              <input className="inp" placeholder="e.g. Lap 1 – CP 1"
+                value={leg.name || ""}
+                onChange={e => updateLeg(i, { name: e.target.value })} />
+            </div>
+            <div>
+              <label className="lbl">Distance (km)</label>
+              <input className="inp" type="number" min="0" step="0.1" placeholder="7.5"
+                value={leg.km || ""}
+                onChange={e => updateLeg(i, { km: parseFloat(e.target.value) || 0 })} />
+            </div>
+            <div>
+              <label className="lbl">Climb (m gain)</label>
+              <input className="inp" type="number" min="0" step="10" placeholder="240"
+                value={leg.gainM || ""}
+                onChange={e => updateLeg(i, { gainM: parseInt(e.target.value, 10) || 0 })} />
+            </div>
+            <div style={{ gridColumn:"1 / -1" }}>
+              <label className="lbl">Aid station stock</label>
+              <input className="inp" placeholder="e.g. Water, Tailwind, bananas"
+                value={leg.stock || ""}
+                onChange={e => updateLeg(i, { stock: e.target.value })} />
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <button className="btn btn-o" style={{ width:"100%", marginBottom:24 }} onClick={addLeg}>
+        + Add checkpoint
+      </button>
+
+      {/* ══ SECTION 2: Fuel Inventory ════════════════════════ */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:10 }}>
+        Fuel Inventory
+      </div>
+      <div style={{ fontSize:12, color:"var(--ink3)", fontStyle:"italic", marginBottom:12 }}>
+        What's going in the vest. Mix and match — the plan uses the average carbs per item.
+      </div>
+
+      {/* Current inventory list */}
+      {(strategy.fuelInventory || []).length === 0 && (
+        <div style={{ fontSize:13, color:"var(--ink4)", fontStyle:"italic",
+          marginBottom:12, padding:"12px var(--pad-x)", background:"var(--bg)",
+          borderRadius:"var(--r)", border:"1px dashed var(--rule)" }}>
+          No fuel added yet — add from presets or enter a custom item.
+        </div>
+      )}
+      {(strategy.fuelInventory || []).map((item, i) => (
+        <div key={i} style={{ display:"flex", alignItems:"center", gap:10,
+          padding:"10px 12px", background:"var(--white)", border:"1px solid var(--rule)",
+          borderRadius:"var(--r)", marginBottom:6 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:"var(--ink)" }}>{item.name}</div>
+            <div style={{ fontSize:11, color:"var(--ink3)", fontFamily:"var(--mono)" }}>
+              {item.carbs}g carbs
+            </div>
+          </div>
+          <button className="btn btn-g btn-sm"
+            onClick={() => removeFuel(i)}
+            style={{ color:"var(--warn)", flexShrink:0 }}>✕</button>
+        </div>
+      ))}
+
+      {/* Add from preset */}
+      <div className="card" style={{ padding:14, marginBottom:8 }}>
+        <label className="lbl">Add from presets</label>
+        <div style={{ display:"flex", gap:8 }}>
+          <select className="sel" value={fuelPreset} onChange={e => setFuelPreset(e.target.value)}>
+            <option value="">— Choose item —</option>
+            {PRESET_OPTIONS.map(name => (
+              <option key={name} value={name}>{name} ({FUEL_LOOKUP[name]}g)</option>
+            ))}
+          </select>
+          <button className="btn btn-p btn-sm" onClick={addPreset}
+            style={{ flexShrink:0, whiteSpace:"nowrap" }}>
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* Add custom item */}
+      <div className="card" style={{ padding:14, marginBottom:24 }}>
+        <label className="lbl">Custom item</label>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr auto auto", gap:8, alignItems:"flex-end" }}>
+          <div>
+            <label className="lbl" style={{ marginBottom:4 }}>Name</label>
+            <input className="inp" placeholder="e.g. Banana"
+              value={customName}
+              onChange={e => setCustomName(e.target.value)} />
+          </div>
+          <div>
+            <label className="lbl" style={{ marginBottom:4 }}>Carbs (g)</label>
+            <input className="inp" type="number" min="1" placeholder="25"
+              style={{ width:72 }}
+              value={customCarbs}
+              onChange={e => setCustomCarbs(e.target.value)} />
+          </div>
+          <button className="btn btn-p btn-sm" onClick={addCustom}
+            style={{ whiteSpace:"nowrap", alignSelf:"flex-end" }}>
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* ══ SECTION 3: Race Plan Output ══════════════════════ */}
+      <RacePlanOutput race={race} strategy={strategy} validLegs={validLegs} />
+
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  RACE PLAN OUTPUT — Section 3 of the Race Day screen.
+//  Calls generateRacePlan and renders results. Pure display —
+//  no state of its own beyond what the engine returns.
+// ─────────────────────────────────────────────────────────────
+function RacePlanOutput({ race, strategy, validLegs }) {
+  if (validLegs.length === 0 || !strategy.targetHours) return null;
+
+  const plan = generateRacePlan(race, strategy);
+  if (!plan) return null;
+
+  // Format legMins as "1h 7min" or "45min"
+  function fmtLegTime(mins) {
+    const h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    return h > 0 ? `${h}h ${m}min` : `${m}min`;
+  }
+
+  // Format pace as "7:12 /km"
+  function fmtPaceStr(minKm) {
+    const m = Math.floor(minKm);
+    const s = String(Math.round((minKm - m) * 60)).padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
+  const GEAR_STATUS = {
+    required: { label:"Required",  bg:"var(--accent-light)", border:"var(--accent)", color:"var(--accent)" },
+    optional: { label:"Optional",  bg:"var(--bg)",           border:"var(--rule)",   color:"var(--ink3)"   },
+    critical: { label:"⚠ Critical", bg:"#fff8e1",            border:"#f59e0b",       color:"#b45309"       },
+  };
+
+  return (
+    <div>
+      <hr className="rule" />
+
+      {/* Section header */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:12 }}>
+        Race Plan
+      </div>
+
+      {/* ── Global summary strip ────────────────────────────── */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:8, marginBottom:16 }}>
+
+        {/* Pace */}
+        <div className="card" style={{ padding:"12px 14px" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:"var(--ink3)", textTransform:"uppercase",
+            letterSpacing:.8, marginBottom:4 }}>Overall pace</div>
+          <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:700,
+            color:"var(--accent)", lineHeight:1 }}>
+            {fmtPaceStr(plan.globalPaceMinKm)}
+          </div>
+          <div style={{ fontSize:10, color:"var(--ink4)", marginTop:2 }}>/km</div>
+        </div>
+
+        {/* Days to go */}
+        <div className="card" style={{ padding:"12px 14px" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:"var(--ink3)", textTransform:"uppercase",
+            letterSpacing:.8, marginBottom:4 }}>Days to race</div>
+          {plan.daysToGo !== null ? (
+            <>
+              <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:700,
+                color: plan.daysToGo < 0 ? "var(--ink4)"
+                     : plan.daysToGo <= 7 ? "var(--warn)"
+                     : "var(--ink)", lineHeight:1 }}>
+                {plan.daysToGo < 0 ? "—" : plan.daysToGo}
+              </div>
+              <div style={{ fontSize:10, color:"var(--ink4)", marginTop:2 }}>
+                {plan.daysToGo < 0 ? "race has passed"
+                 : plan.daysToGo === 0 ? "today!"
+                 : plan.daysToGo === 1 ? "tomorrow"
+                 : "days"}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize:13, color:"var(--ink4)", fontStyle:"italic" }}>Set a date</div>
+          )}
+        </div>
+
+        {/* Total items */}
+        <div className="card" style={{ padding:"12px 14px" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:"var(--ink3)", textTransform:"uppercase",
+            letterSpacing:.8, marginBottom:4 }}>Total fuel items</div>
+          <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:700,
+            color:"var(--ink)", lineHeight:1 }}>{plan.totalItems}</div>
+          <div style={{ fontSize:10, color:"var(--ink4)", marginTop:2 }}>across all legs</div>
+        </div>
+
+        {/* Peak flasks */}
+        <div className="card" style={{ padding:"12px 14px" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:"var(--ink3)", textTransform:"uppercase",
+            letterSpacing:.8, marginBottom:4 }}>Peak flasks</div>
+          <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:700,
+            color:"var(--ink)", lineHeight:1 }}>{plan.peakFlasks}</div>
+          <div style={{ fontSize:10, color:"var(--ink4)", marginTop:2 }}>on the hardest leg</div>
+        </div>
+      </div>
+
+      {/* ── Per-leg breakdown ───────────────────────────────── */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>
+        Leg Breakdown
+      </div>
+
+      {plan.legs.map((leg, i) => (
+        <div key={i} className="card" style={{ marginBottom:10, overflow:"hidden" }}>
+
+          {/* Leg header bar */}
+          <div style={{ background:"var(--ink)", padding:"10px 14px",
+            display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--gold)",
+                fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:2 }}>
+                Leg {i + 1}
+              </div>
+              <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>
+                {leg.name || `Checkpoint ${i + 1}`}
+              </div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700,
+                color:"var(--gold)", lineHeight:1 }}>
+                {fmtLegTime(leg.legMins)}
+              </div>
+              <div style={{ fontSize:10, color:"rgba(255,255,255,.55)", marginTop:2 }}>
+                {leg.km}km · +{leg.gainM}m
+              </div>
+            </div>
+          </div>
+
+          {/* Nutrition row */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)",
+            borderBottom:"1px solid var(--rule)" }}>
+            {[
+              { label:"Carbs",  value:`${leg.carbsG}g`,   sub:"required"  },
+              { label:"Fluid",  value:`${leg.fluidMl}ml`, sub:"required"  },
+              { label:"Items",  value:leg.vestItems,       sub:"carry in"  },
+              { label:"Flasks", value:leg.flasks,          sub:"soft flask" },
+            ].map(({ label, value, sub }) => (
+              <div key={label} style={{ padding:"10px 8px", textAlign:"center",
+                borderRight:"1px solid var(--rule)" }}>
+                <div style={{ fontFamily:"var(--mono)", fontSize:16, fontWeight:700,
+                  color:"var(--accent)", lineHeight:1 }}>{value}</div>
+                <div style={{ fontSize:9, color:"var(--ink3)", textTransform:"uppercase",
+                  letterSpacing:.5, fontWeight:600, marginTop:3 }}>{label}</div>
+                <div style={{ fontSize:9, color:"var(--ink4)", marginTop:1 }}>{sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Aid station stock */}
+          {leg.stock && (
+            <div style={{ padding:"8px 14px", background:"var(--bg)" }}>
+              <span style={{ fontSize:10, fontWeight:700, color:"var(--ink3)",
+                textTransform:"uppercase", letterSpacing:.5 }}>Aid station: </span>
+              <span style={{ fontSize:12, color:"var(--ink2)" }}>{leg.stock}</span>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* ── Totals summary card ──────────────────────────────── */}
+      <div className="card" style={{ padding:14, marginBottom:16,
+        background:"var(--gold-pale)", borderColor:"var(--gold-dark)" }}>
+        <div style={{ fontSize:11, fontWeight:700, color:"var(--gold-dark)", letterSpacing:1,
+          textTransform:"uppercase", marginBottom:10 }}>Vest totals</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontFamily:"var(--mono)", fontSize:20, fontWeight:700,
+              color:"var(--gold-dark)", lineHeight:1 }}>{plan.totalItems}</div>
+            <div style={{ fontSize:10, color:"var(--gold-dark)", textTransform:"uppercase",
+              letterSpacing:.5, fontWeight:600, marginTop:3 }}>total items</div>
+          </div>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontFamily:"var(--mono)", fontSize:20, fontWeight:700,
+              color:"var(--gold-dark)", lineHeight:1 }}>{plan.peakFlasks}</div>
+            <div style={{ fontSize:10, color:"var(--gold-dark)", textTransform:"uppercase",
+              letterSpacing:.5, fontWeight:600, marginTop:3 }}>peak flasks</div>
+          </div>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontFamily:"var(--mono)", fontSize:20, fontWeight:700,
+              color:"var(--gold-dark)", lineHeight:1 }}>{plan.totalDistKm}</div>
+            <div style={{ fontSize:10, color:"var(--gold-dark)", textTransform:"uppercase",
+              letterSpacing:.5, fontWeight:600, marginTop:3 }}>km total</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Gear checklist ──────────────────────────────────── */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>
+        Gear Checklist
+      </div>
+
+      {/* Group by status: critical first, then required, then optional */}
+      {["critical", "required", "optional"].map(status => {
+        const items = plan.gear.filter(g => g.status === status);
+        if (items.length === 0) return null;
+        const cfg = GEAR_STATUS[status];
+        return (
+          <div key={status} style={{ marginBottom:10 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:cfg.color,
+              textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>
+              {cfg.label}
+            </div>
+            {items.map((g, i) => (
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:10,
+                padding:"9px 12px", background:cfg.bg,
+                border:`1px solid ${cfg.border}`,
+                borderRadius:"var(--r)", marginBottom:5 }}>
+                <div style={{ width:16, height:16, border:`2px solid ${cfg.border}`,
+                  borderRadius:3, flexShrink:0, background:"var(--white)" }} />
+                <div style={{ fontSize:13, color:"var(--ink)", flex:1 }}>{g.item}</div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+    </div>
+  );
+}
+
 function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, onLogout, onSignIn }) {
   const is8bit = skin === "8bit";
+  const isDark  = skin === "dark";
+
+  // Cycle to the next skin in the SKINS array
+  function cycleSkin() {
+    const idx  = SKINS.indexOf(skin);
+    const next = SKINS[(idx + 1) % SKINS.length];
+    setSkin(next);
+  }
+
+  // Button label: show next skin name so user knows what they'll get
+  const skinLabels = { default:"Default", "8bit":"8-Bit", dark:"Dark" };
+  const skinIcons  = { default:"🎨", "8bit":"🕹", dark:"⚡" };
+  const skinLabel  = skinLabels[skin] || skin;
+  const skinIcon   = skinIcons[skin]  || "🎨";
   return (
     <div style={{position:"sticky",top:0,zIndex:100}}>
       <div style={{background:"var(--hud)",padding:"4px var(--pad-x)",
@@ -4645,15 +4137,15 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
           </div>
         </div>
 
-        {/* Skin toggle */}
+        {/* Skin cycle button */}
         <button
-          onClick={() => setSkin(is8bit ? "default" : "8bit")}
-          title={is8bit ? "Switch to default theme" : "Switch to 8-bit theme"}
+          onClick={cycleSkin}
+          title={`Current: ${skinLabel} — click to cycle skins`}
           style={{
-            background: is8bit ? "#ffd700" : "rgba(255,255,255,0.12)",
-            border: is8bit ? "2px solid #b8960c" : "2px solid rgba(255,255,255,0.25)",
+            background: is8bit ? "#ffd700" : isDark ? "rgba(57,255,154,0.1)" : "rgba(255,255,255,0.12)",
+            border: is8bit ? "2px solid #b8960c" : isDark ? "1px solid #39FF9A" : "2px solid rgba(255,255,255,0.25)",
             borderRadius: is8bit ? 0 : 8,
-            color: is8bit ? "#0a0a1a" : "#fff",
+            color: is8bit ? "#0a0a1a" : isDark ? "#39FF9A" : "#fff",
             fontSize: is8bit ? 9 : 11,
             fontWeight: 700,
             padding: "5px 10px",
@@ -4665,7 +4157,7 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
             flexShrink: 0,
             lineHeight: 1.4,
           }}>
-          {is8bit ? "🕹 8-BIT" : "🎨 Theme"}
+          {skinIcon} {is8bit ? "SKINS" : "Skins"}
         </button>
 
         <div style={{textAlign:"right"}}>
@@ -4681,6 +4173,7 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
             {id:"stats",   label:"Stats"},
             {id:"log",     label:"Log"},
             {id:"event",   label:"Event"},
+            {id:"race",    label:"Race Day"},
             {id:"profile", label:"Profile"},
           ].map(t => (
             <button key={t.id} onClick={() => onNav(t.id)} className={`nav-tab${screen===t.id?" active":""}`}>
@@ -5609,6 +5102,7 @@ export default function App() {
   const [completionMap,    setCompletionMap]    = useState({});
   const [feedbackOpen,     setFeedbackOpen]     = useState(false); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
   const [skin,           setSkinState]      = useState("default"); // "default" | "8bit"
+  const [racePlan,       setRacePlanState]  = useState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
 
   // Apply skin to <body data-skin="..."> and persist choice
   async function setSkin(s) {
@@ -5658,7 +5152,7 @@ export default function App() {
         // Stamp today as their start so the plan anchors going forward (any sessions before
         // today simply won't have history — but the plan stops drifting from that point on).
         if (!loaded.planStartDate) {
-          loaded.planStartDate = todaySydney();
+          loaded.planStartDate = todaySydneyStr();
           try { await store.set("bep6_profile", JSON.stringify(loaded)); } catch {}
         }
         setProfile(loaded);
@@ -5671,6 +5165,7 @@ export default function App() {
     try { const r = await store.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
+    try { const r = await store.get("bep6_racePlan");  if (r) setRacePlanState(JSON.parse(r.value)); } catch {}
   }
 
   // Called when the user successfully signs in via the optional overlay.
@@ -5703,6 +5198,16 @@ export default function App() {
     if (authReady) loadPersistedState();
   }, [authReady]);
 
+  // One-time migration: ensure workoutMinutes exists on old profiles that
+  // were saved before this field was introduced.
+  useEffect(() => {
+    if (profile && !profile.workoutMinutes) {
+      const migrated = { ...profile, workoutMinutes: DEFAULT_WORKOUT_MINUTES };
+      setProfile(migrated);
+      try { store.set("bep6_profile", JSON.stringify(migrated)); } catch {}
+    }
+  }, [profile?.planStartDate]);
+
   // Rebuild the plan whenever profile, event, or feedback changes
   useEffect(() => {
     if (profile) setPlan(buildPlan(profile, event, feedbackMap));
@@ -5728,8 +5233,11 @@ export default function App() {
   async function handleOnboardingComplete(p, e) {
     // Stamp the original plan start date if not already set, so weeks anchor to a
     // fixed point in time and past weeks remain visible as the plan progresses.
-    const withStart = { ...p, planStartDate: p.planStartDate || todaySydney() };
+    const withStart = { ...p, planStartDate: p.planStartDate || todaySydneyStr() };
     setProfile(withStart); setEvent(e); setFeedbackMap({});
+    setSessionOverrides({}); setDaySlotOverrides({});
+    try { await store.delete("bep6_overrides"); } catch {}
+    try { await store.delete("bep6_slots"); } catch {}
     try { await store.set("bep6_profile", JSON.stringify(withStart)); } catch {}
     if (e) {
       try { await store.set("bep6_event", JSON.stringify(e)); } catch {}
@@ -5787,6 +5295,12 @@ export default function App() {
     try { store.set("bep6_profile", JSON.stringify(updated)); } catch {}
   }
 
+  // Update the race plan (course setup + strategy). Persists to bep6_racePlan.
+  function handleRacePlanUpdate(next) {
+    setRacePlanState(next);
+    try { store.set("bep6_racePlan", JSON.stringify(next)); } catch {}
+  }
+
   // Save a manual edit to a single session (distance, notes, label).
   // Stored in sessionOverrides so it survives plan rebuilds.
   function handleSessionEdit(weekNum, dayId, changes) {
@@ -5828,6 +5342,22 @@ export default function App() {
     setDaySlotOverrides(next);
     try { store.set("bep6_slots", JSON.stringify(next)); } catch {}
     showToast("Day updated — plan refreshed");
+  }
+
+  // Atomic two-day swap — builds both overrides in one state update to avoid
+  // the stale-closure race that happens when onDaySlotChange is called twice.
+  function handleSwapDays(weekNum, dayIdA, slotA, dayIdB, slotB) {
+    const next = {
+      ...daySlotOverrides,
+      [weekNum]: {
+        ...(daySlotOverrides[weekNum] || {}),
+        [dayIdA]: slotA,
+        [dayIdB]: slotB,
+      },
+    };
+    setDaySlotOverrides(next);
+    try { store.set("bep6_slots", JSON.stringify(next)); } catch {}
+    showToast("Sessions swapped — plan refreshed");
   }
 
   // Merge plan weeks with any overrides before rendering.
@@ -6172,6 +5702,13 @@ export default function App() {
           </div>
         )}
 
+        {screen === "race" && hasData && (
+          <RaceDayScreen
+            racePlan={racePlan}
+            onChange={handleRacePlanUpdate}
+          />
+        )}
+
         {screen === "profile" && hasData && profile && (
           <div style={{padding:"var(--pad-x)"}}>
             <div style={{fontFamily:"var(--display)",fontSize:24,letterSpacing:1,marginBottom:14}}>
@@ -6244,20 +5781,24 @@ export default function App() {
                   <div style={{fontSize:11,fontWeight:600,color:"var(--ink3)",letterSpacing:.8,textTransform:"uppercase",marginBottom:4}}>
                     Workout duration
                   </div>
-                  <div style={{fontSize:12,color:"var(--ink3)",marginBottom:12,fontStyle:"italic"}}>
-                    How long do you want each workout to go for? Longer = more reps / longer tempo.
-                    Wednesday Bronies day workouts are usually kept shorter so you can make coffee.
+                  <div style={{fontSize:12,color:"var(--ink3)",marginBottom:4,fontStyle:"italic"}}>
+                    Each day can be different — set how long you want each workout to run.
+                    Longer = more reps / longer tempo.
+                  </div>
+                  <div style={{fontSize:11,color:"var(--gold)",fontWeight:600,marginBottom:12}}>
+                    Saves instantly.
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {workoutDays.map(d => {
                       const current = wkMins[d.id] || 45;
                       return (
-                        <div key={d.id} style={{display:"flex",alignItems:"center",gap:10}}>
-                          <span style={{fontSize:12,fontWeight:700,color:"var(--ink2)",
-                            minWidth:60,letterSpacing:.5,textTransform:"uppercase"}}>
+                        <div key={d.id} style={{padding:"10px 12px",background:"var(--surface)",
+                          borderRadius:"var(--r)",border:"1px solid var(--rule)"}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"var(--ink2)",
+                            letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>
                             {d.label}
-                          </span>
-                          <div style={{display:"flex",gap:4,flex:1,flexWrap:"wrap"}}>
+                          </div>
+                          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                             {[45, 60, 75, 90].map(opt => (
                               <button key={opt}
                                 onClick={() => handleWorkoutMinutesUpdate(d.id, opt)}
@@ -6279,7 +5820,7 @@ export default function App() {
               );
             })()}
             <button onClick={() => setScreen("onboarding")} className="btn btn-o" style={{width:"100%",marginBottom:10}}>
-              ✏ Update profile
+              ✏ Edit event / goal
             </button>
             <button onClick={resetAll} className="btn btn-g btn-sm" style={{width:"100%"}}>
               🗑 Reset everything
@@ -6296,6 +5837,7 @@ export default function App() {
             })}
             onEdit={handleSessionEdit}
             onDaySlotChange={handleDaySlotChange}
+            onSwapDays={handleSwapDays}
             onFeedback={handleFeedback}
             feedbackMap={feedbackMap}
             completionMap={completionMap}
