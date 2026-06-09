@@ -587,7 +587,7 @@ const DEMO_SCENARIOS = {
 //      m   → unitId:1, unitKey:"meter",     factor:100.0
 //  - Pace is stored as m/s: targetValueOne = slower (lower m/s),
 //    targetValueTwo = faster (higher m/s)
-//  - Structured repeats use RepeatStepDTO wrapping child ExecutableStepDTOs
+//  - Structured repeats use RepeatGroupDTO wrapping child ExecutableStepDTOs
 //    This creates a "Repeat N times" block in Garmin Connect
 // ─────────────────────────────────────────────────────────────
 
@@ -599,12 +599,9 @@ function paceToMs(secPerKm) {
   return Math.round((1000 / secPerKm) * 1e7) / 1e7;
 }
 
-// Prefer km for anything >= 1km, metres below that
-function distUnit(metres) {
-  return metres >= 1000
-    ? { unitId: 2, unitKey: "kilometer", factor: 100000.0 }
-    : { unitId: 1, unitKey: "meter", factor: 100.0 };
-}
+// endConditionValue is always in METRES (Garmin's internal unit).
+// preferredEndConditionUnit tells Garmin Connect which unit to DISPLAY — set to km.
+const KM_UNIT = { unitId: 2, unitKey: "kilometer", factor: 100000.0 };
 
 function garminStepType(key) {
   const map = { warmup:1, cooldown:2, interval:3, recovery:4, rest:5 };
@@ -621,12 +618,15 @@ function garminBaseFields(extra) {
     strokeType: { strokeTypeId:0, strokeTypeKey:null, displayOrder:0 },
     equipmentType: { equipmentTypeId:0, equipmentTypeKey:null, displayOrder:0 },
     category: null, exerciseName: null, workoutProvider: null,
-    providerExerciseSourceId: null, weightValue: null, weightUnit: null,
+    providerExerciseSourceId: null,
+    weightValue: -1.0,
+    weightUnit: { unitId:8, unitKey:"kilogram", factor:1000.0 },
     ...extra,
   };
 }
 
-// Distance-based executable step (interval, warmup, cooldown, recovery)
+// Distance-based executable step (interval, recovery)
+// endConditionValue = metres; preferredEndConditionUnit = km (display only)
 function garminStep(order, typeKey, distM, slowSecKm, fastSecKm, desc) {
   const hasPace = slowSecKm && fastSecKm;
   return {
@@ -637,7 +637,32 @@ function garminStep(order, typeKey, distM, slowSecKm, fastSecKm, desc) {
     description: desc || null,
     endCondition: { conditionTypeId:3, conditionTypeKey:"distance", displayOrder:3, displayable:true },
     endConditionValue: distM,
-    preferredEndConditionUnit: distUnit(distM),
+    preferredEndConditionUnit: KM_UNIT,
+    targetType: hasPace
+      ? { workoutTargetTypeId:6, workoutTargetTypeKey:"pace.zone", displayOrder:6 }
+      : { workoutTargetTypeId:1, workoutTargetTypeKey:"no.target", displayOrder:1 },
+    targetValueOne: hasPace ? paceToMs(slowSecKm) : null,
+    targetValueTwo: hasPace ? paceToMs(fastSecKm) : null,
+    ...garminBaseFields({}),
+  };
+}
+
+// Lap-button step for warmup/cooldown — ends on manual lap press.
+// Distance is shown as a note in description (e.g. "2km warm up") rather
+// than enforced by the watch, matching how Garmin's own workouts work.
+function garminLapStep(order, typeKey, distM, slowSecKm, fastSecKm, desc) {
+  const hasPace = slowSecKm && fastSecKm;
+  const km = distM >= 1000 ? `${distM / 1000}km` : `${distM}m`;
+  const label = desc || (typeKey === "warmup" ? `${km} warm up` : `${km} cool down`);
+  return {
+    type: "ExecutableStepDTO",
+    stepId: nextStepId(),
+    stepOrder: order,
+    stepType: garminStepType(typeKey),
+    description: label,
+    endCondition: { conditionTypeId:1, conditionTypeKey:"lap.button", displayOrder:1, displayable:true },
+    endConditionValue: 0.0,
+    preferredEndConditionUnit: null,
     targetType: hasPace
       ? { workoutTargetTypeId:6, workoutTargetTypeKey:"pace.zone", displayOrder:6 }
       : { workoutTargetTypeId:1, workoutTargetTypeKey:"no.target", displayOrder:1 },
@@ -656,7 +681,7 @@ function garminTimeStep(order, typeKey, durSec, slowSecKm, fastSecKm, desc) {
     stepOrder: order,
     stepType: garminStepType(typeKey),
     description: desc || null,
-    endCondition: { conditionTypeId:1, conditionTypeKey:"time", displayOrder:1, displayable:true },
+    endCondition: { conditionTypeId:2, conditionTypeKey:"time", displayOrder:2, displayable:true },
     endConditionValue: durSec,
     preferredEndConditionUnit: null,
     targetType: hasPace
@@ -668,20 +693,24 @@ function garminTimeStep(order, typeKey, durSec, slowSecKm, fastSecKm, desc) {
   };
 }
 
-// Repeat block — wraps child steps into a RepeatStepDTO so Garmin shows
+// Repeat block — wraps child steps into a RepeatGroupDTO so Garmin shows
 // "Repeat N times" with the interval + rest grouped inside.
-function garminRepeat(order, iterations, childSteps) {
-  const numbered = childSteps.map((s, i) => ({ ...s, stepOrder: i + 1 }));
+// globalOffset is the stepOrder of steps that come before the repeat block,
+// so inner steps continue the global counter rather than resetting to 1.
+function garminRepeat(order, iterations, childSteps, globalOffset) {
+  const offset = globalOffset ?? order; // steps before this repeat
+  const numbered = childSteps.map((s, i) => ({ ...s, stepOrder: offset + i + 1 }));
   return {
-    type: "RepeatStepDTO",
+    type: "RepeatGroupDTO",
     stepId: nextStepId(),
     stepOrder: order,
     stepType: { stepTypeId:6, stepTypeKey:"repeat", displayOrder:6 },
-    childStepId: numbered[0]?.stepId ?? null,
+    childStepId: 1,
     description: null,
     numberOfIterations: iterations,
     smartRepeat: false,
-    endCondition: { conditionTypeId:7, conditionTypeKey:"iterations", displayOrder:7, displayable:true },
+    skipLastRestStep: null,
+    endCondition: { conditionTypeId:7, conditionTypeKey:"iterations", displayOrder:7, displayable:false },
     endConditionValue: iterations,
     preferredEndConditionUnit: null,
     endConditionCompare: null,
@@ -693,7 +722,9 @@ function garminRepeat(order, iterations, childSteps) {
     strokeType: { strokeTypeId:0, strokeTypeKey:null, displayOrder:0 },
     equipmentType: { equipmentTypeId:0, equipmentTypeKey:null, displayOrder:0 },
     category: null, exerciseName: null, workoutProvider: null,
-    providerExerciseSourceId: null, weightValue: null, weightUnit: null,
+    providerExerciseSourceId: null,
+    weightValue: -1.0,
+    weightUnit: { unitId:8, unitKey:"kilogram", factor:1000.0 },
     workoutSteps: numbered,
   };
 }
@@ -717,8 +748,8 @@ function buildGarminWorkout(session,paces){
   const ztp=[tpSlow,tpFast];
   const zep=[epSlow,epFast];
   const zwu=[wuSlow,wuFast];
-  const WU2=()=>garminStep(0,"warmup",2000,zwu[0],zwu[1],"2km warm up");
-  const CD2=()=>garminStep(0,"cooldown",2000,zep[0],zep[1],"2km cool down");
+  const WU2=()=>garminLapStep(0,"warmup",2000,zwu[0],zwu[1],"2km warm up");
+  const CD2=()=>garminLapStep(0,"cooldown",2000,zep[0],zep[1],"2km cool down");
   const REST=(sec,label)=>garminTimeStep(0,"recovery",sec,null,null,label||"Standing rest");
   const lbl=session.label||"";
   let steps=[];
@@ -843,14 +874,14 @@ function buildGarminWorkout(session,paces){
     steps.push(garminTimeStep(0,"interval",third*60,ztp[0],ztp[1],`${third}min tempo finish @ ${fmtPace(tp)}/km`));
   } else if(/Hill Sprints/.test(lbl)){
     const sets=parseInt(lbl.match(/(\d+)×/)?.[1])||6;
-    steps.push(garminStep(0,"warmup",2000,zwu[0],zwu[1],"2km warm up"));
+    steps.push(garminLapStep(0,"warmup",2000,zwu[0],zwu[1],"2km warm up"));
     steps.push(garminRepeat(0,sets,[garminTimeStep(0,"interval",60,null,null,"1min hill sprint — max effort"),garminTimeStep(0,"recovery",90,null,null,"Walk back to start — full recovery")]));
-    steps.push(garminStep(0,"cooldown",2000,null,null,"2km cool down"));
+    steps.push(garminLapStep(0,"cooldown",2000,null,null,"2km cool down"));
   } else if(/Hill Efforts/.test(lbl)){
     const sets=parseInt(lbl.match(/(\d+)×/)?.[1])||5;
-    steps.push(garminStep(0,"warmup",2000,zwu[0],zwu[1],"2km warm up"));
+    steps.push(garminLapStep(0,"warmup",2000,zwu[0],zwu[1],"2km warm up"));
     steps.push(garminRepeat(0,sets,[garminTimeStep(0,"interval",120,null,null,"2min hill effort — hard (RPE 7–8)"),garminTimeStep(0,"recovery",120,null,null,"Walk back to start — full recovery")]));
-    steps.push(garminStep(0,"cooldown",2000,null,null,"2km cool down"));
+    steps.push(garminLapStep(0,"cooldown",2000,null,null,"2km cool down"));
   } else if(["easy","bronies","long"].includes(session.wtype)){
     const distM=Math.round((session.distance||8)*1000);
     steps.push(garminStep(0,"interval",distM,zep[0],zep[1],`${session.distance}km easy @ ${fmtPace(ep)}/km or slower`));
@@ -858,9 +889,16 @@ function buildGarminWorkout(session,paces){
     return null;
   }
 
-  steps=steps.map((s,i)=>({...s,stepOrder:i+1}));
-  function totalDistM(stepList){return(stepList||[]).reduce((sum,s)=>{if(s.type==="RepeatStepDTO") return sum+totalDistM(s.workoutSteps)*(s.numberOfIterations||1);if(s.endCondition?.conditionTypeKey==="distance") return sum+(s.endConditionValue||0);return sum;},0);}
-  function totalSecF(stepList){return(stepList||[]).reduce((sum,s)=>{if(s.type==="RepeatStepDTO") return sum+totalSecF(s.workoutSteps)*(s.numberOfIterations||1);if(s.endCondition?.conditionTypeKey==="time") return sum+(s.endConditionValue||0);if(s.endCondition?.conditionTypeKey==="distance"){const midMs=s.targetValueOne?(s.targetValueOne+(s.targetValueTwo||s.targetValueOne))/2:(ep>0?1000/ep:3);return sum+(s.endConditionValue||0)/midMs;}return sum;},0);}
+  // Number top-level steps 1, 2, 3...
+  steps = steps.map((s, i) => ({ ...s, stepOrder: i + 1 }));
+  // For each RepeatGroupDTO, renumber its inner steps continuing from the repeat's own stepOrder
+  steps = steps.map(s => {
+    if (s.type !== "RepeatGroupDTO") return s;
+    const numbered = s.workoutSteps.map((cs, ci) => ({ ...cs, stepOrder: s.stepOrder + ci + 1 }));
+    return { ...s, workoutSteps: numbered };
+  });
+  function totalDistM(stepList){return(stepList||[]).reduce((sum,s)=>{if(s.type==="RepeatGroupDTO") return sum+totalDistM(s.workoutSteps)*(s.numberOfIterations||1);if(s.endCondition?.conditionTypeKey==="distance") return sum+(s.endConditionValue||0);return sum;},0);}
+  function totalSecF(stepList){return(stepList||[]).reduce((sum,s)=>{if(s.type==="RepeatGroupDTO") return sum+totalSecF(s.workoutSteps)*(s.numberOfIterations||1);if(s.endCondition?.conditionTypeKey==="time") return sum+(s.endConditionValue||0);if(s.endCondition?.conditionTypeKey==="distance"){const midMs=s.targetValueOne?(s.targetValueOne+(s.targetValueTwo||s.targetValueOne))/2:(ep>0?1000/ep:3);return sum+(s.endConditionValue||0)/midMs;}return sum;},0);}
   const tDist=totalDistM(steps);
   const tSec=totalSecF(steps);
   return {workoutId:null,ownerId:null,workoutName:session.label||"Workout",description:session.summary||null,updatedDate:new Date().toISOString().slice(0,19)+".0",createdDate:new Date().toISOString().slice(0,19)+".0",sportType:{sportTypeId:1,sportTypeKey:"running",displayOrder:1},subSportType:null,trainingPlanId:null,author:null,sharedWithUsers:null,estimatedDurationInSecs:Math.round(tSec),estimatedDistanceInMeters:tDist>0?tDist:null,workoutSegments:[{segmentOrder:1,sportType:{sportTypeId:1,sportTypeKey:"running",displayOrder:1},poolLengthUnit:null,poolLength:null,avgTrainingSpeed:null,estimatedDurationInSecs:null,estimatedDistanceInMeters:null,estimatedDistanceUnit:null,estimateType:null,description:null,workoutSteps:steps}],poolLength:null,poolLengthUnit:null,locale:null,workoutProvider:null,workoutSourceId:null,uploadTimestamp:null,atpPlanId:null,consumer:null,consumerName:null,consumerImageURL:null,consumerWebsiteURL:null,workoutNameI18nKey:null,descriptionI18nKey:null,avgTrainingSpeed:tDist>0&&tSec>0?tDist/tSec:null,estimateType:"TIME_ESTIMATED",estimatedDistanceUnit:{unitId:1,unitKey:"meter",factor:100.0},workoutThumbnailUrl:null,isSessionTransitionEnabled:null,shared:false};
@@ -1389,6 +1427,11 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                         ↕ Move to another day {showMovePanel ? "▲" : "▼"}
                       </button>
                       {showMovePanel && (() => {
+                        // A completed session moves one-way — it replaces the target day
+                        // rather than swapping, because you can't undo what's already done.
+                        const isCompleted = !!(completionMap?.[completionKey]);
+                        const isMoveOnly  = isPast && isCompleted;
+
                         // All other days in the week, excluding race days and this day
                         const otherDays = DAYS.filter(d =>
                           d.id !== dayId && weekSessions[d.id]?.wtype !== "race"
@@ -1396,7 +1439,9 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                         return (
                           <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
                             <div style={{fontSize:11,color:"var(--ink4)",marginBottom:2}}>
-                              Tap a day to swap — this session moves there and that session comes here.
+                              {isMoveOnly
+                                ? "This session is completed — tap a day to copy it there (that day's session will be replaced)."
+                                : "Tap a day to swap — this session moves there and that session comes here."}
                             </div>
                             {otherDays.map(d => {
                               const other = weekSessions[d.id];
@@ -1407,19 +1452,19 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                               return (
                                 <button key={d.id}
                                   onClick={() => {
-                                    // Map a live session back to the slot key used by the engine.
-                                    // isWorkoutSlot() handles all workout subtypes so this stays
-                                    // correct when new session types are added to the engine.
                                     const sessionToSlot = (s) =>
                                       isWorkoutSlot(s?.wtype) ? "workout"
                                       : s?.wtype === "rest" && (s?.label || "").includes("Strength") ? "strength"
                                       : s?.wtype || "rest";
                                     const thisSlot  = sessionToSlot(session);
                                     const otherSlot = sessionToSlot(other);
-                                    if (onSwapDays) {
+                                    if (isMoveOnly) {
+                                      // One-way: put this session's slot on the target day only.
+                                      // The source day keeps its existing slot (it's done).
+                                      onDaySlotChange(d.id, thisSlot);
+                                    } else if (onSwapDays) {
                                       onSwapDays(dayId, otherSlot, d.id, thisSlot);
                                     } else {
-                                      // Fallback — should not be reached but kept for safety
                                       onDaySlotChange(dayId, otherSlot);
                                       onDaySlotChange(d.id, thisSlot);
                                     }
@@ -1439,7 +1484,9 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                                     {d.short}
                                   </span>
                                   <span style={{flex:1}}>{otherIcon} {otherLabel}</span>
-                                  <span style={{fontSize:10,color:"var(--ink4)"}}>↔ swap</span>
+                                  <span style={{fontSize:10,color:"var(--ink4)"}}>
+                                    {isMoveOnly ? "→ replace" : "↔ swap"}
+                                  </span>
                                 </button>
                               );
                             })}
