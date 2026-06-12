@@ -29,6 +29,7 @@ import {
   generateRacePlan,
   FUEL_LOOKUP, DEFAULT_STRATEGY, DEFAULT_LEG,
   parseAidStations, parseBulkCheckpoints,
+  planRun,
 } from "@bronies/race-engine";
 
 import {
@@ -3667,6 +3668,322 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 //  UI: Header
 // ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
+//  RUN PLANNER SCREEN
+//  Ad-hoc fuelling plan for a training run or tune-up race.
+//  No course needed — just distance, pace, conditions, fuel.
+// ─────────────────────────────────────────────────────────────
+function RunPlannerScreen({ nutritionLib = [] }) {
+
+  // ── Inputs ────────────────────────────────────────────────
+  const [distKm,         setDistKm]         = useState("");
+  const [paceMin,        setPaceMin]         = useState("");
+  const [paceSec,        setPaceSec]         = useState("");
+  const [conditions,     setConditions]      = useState("mild");
+  const [waterAvailable, setWaterAvailable]  = useState(false);
+  const [selectedFuel,   setSelectedFuel]    = useState([]); // names of items selected for this run
+
+  // Merge library + built-ins for fuel selection
+  const builtins   = Object.entries(FUEL_LOOKUP).map(([name, carbs]) => ({ name, carbs, source:"builtin" }));
+  const libNames   = new Set(nutritionLib.map(i => i.name.toLowerCase()));
+  const allItems   = [
+    ...nutritionLib,
+    ...builtins.filter(i => !libNames.has(i.name.toLowerCase())),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+
+  const fuelInventory = allItems.filter(i => selectedFuel.includes(i.name));
+
+  function toggleFuel(name) {
+    setSelectedFuel(prev =>
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+    );
+  }
+
+  // ── Derived plan ──────────────────────────────────────────
+  const dist    = parseFloat(distKm);
+  const pMin    = parseInt(paceMin, 10) || 0;
+  const pSec    = parseInt(paceSec, 10) || 0;
+  const paceSecKm = pMin * 60 + pSec;
+
+  const plan = (dist > 0 && paceSecKm > 60)
+    ? planRun({ distKm: dist, paceSecKm, conditions, fuelInventory, waterAvailable })
+    : null;
+
+  // ── Pace helpers ──────────────────────────────────────────
+  function fmtPaceInput(secKm) {
+    if (!secKm) return "";
+    const m = Math.floor(secKm / 60);
+    const s = String(secKm % 60).padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
+  // Common distances quick-pick
+  const QUICK_DISTANCES = [
+    { label:"10km", km:10 },
+    { label:"Half", km:21.1 },
+    { label:"30km", km:30 },
+    { label:"Mara", km:42.2 },
+  ];
+
+  const CONDITIONS = [
+    { value:"cool", label:"❄ Cool",  sub:"< 15°C" },
+    { value:"mild", label:"🌤 Mild",  sub:"15–22°C" },
+    { value:"warm", label:"☀ Warm",  sub:"22–28°C" },
+    { value:"hot",  label:"🔥 Hot",   sub:"> 28°C"  },
+  ];
+
+  return (
+    <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
+
+      {/* Header */}
+      <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
+        Run Planner
+      </div>
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:20 }}>
+        Quick fuelling plan for any training run or tune-up race.
+      </div>
+
+      {/* ── Distance ─────────────────────────────────────── */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>Distance</div>
+
+      <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" }}>
+        {QUICK_DISTANCES.map(d => (
+          <button key={d.label}
+            onClick={() => setDistKm(String(d.km))}
+            style={{ padding:"6px 14px", borderRadius:"var(--r)", fontSize:12, fontWeight:700,
+              border:`2px solid ${parseFloat(distKm) === d.km ? "var(--ink)" : "var(--rule)"}`,
+              background: parseFloat(distKm) === d.km ? "var(--ink)" : "var(--white)",
+              color: parseFloat(distKm) === d.km ? "#fff" : "var(--ink3)",
+              cursor:"pointer", transition:"all .15s" }}>
+            {d.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:16 }}>
+        <input className="inp" type="number" min="0" step="0.1" placeholder="km"
+          style={{ width:90 }}
+          value={distKm}
+          onChange={e => setDistKm(e.target.value)} />
+        <span style={{ fontSize:13, color:"var(--ink3)" }}>km</span>
+      </div>
+
+      {/* ── Pace ─────────────────────────────────────────── */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>Target pace</div>
+
+      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:16 }}>
+        <input className="inp" type="number" min="3" max="20" placeholder="min"
+          style={{ width:72, textAlign:"center" }}
+          value={paceMin}
+          onChange={e => setPaceMin(e.target.value)} />
+        <span style={{ fontFamily:"var(--mono)", fontSize:18, color:"var(--ink3)", fontWeight:700 }}>:</span>
+        <input className="inp" type="number" min="0" max="59" placeholder="sec"
+          style={{ width:72, textAlign:"center" }}
+          value={paceSec}
+          onChange={e => setPaceSec(e.target.value.padStart(2,"0").slice(-2))} />
+        <span style={{ fontSize:13, color:"var(--ink3)" }}>/km</span>
+      </div>
+
+      {/* ── Conditions ───────────────────────────────────── */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>Conditions</div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6, marginBottom:16 }}>
+        {CONDITIONS.map(c => (
+          <button key={c.value}
+            onClick={() => setConditions(c.value)}
+            style={{ padding:"8px 4px", borderRadius:"var(--r)", fontSize:11, fontWeight:700,
+              border:`2px solid ${conditions === c.value ? "var(--ink)" : "var(--rule)"}`,
+              background: conditions === c.value ? "var(--ink)" : "var(--white)",
+              color: conditions === c.value ? "#fff" : "var(--ink3)",
+              cursor:"pointer", transition:"all .15s", textAlign:"center" }}>
+            <div>{c.label}</div>
+            <div style={{ fontSize:9, fontWeight:400, opacity:.7, marginTop:2 }}>{c.sub}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Water on course ──────────────────────────────── */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16,
+        padding:"10px 14px", background:"var(--bg)", borderRadius:"var(--r)",
+        border:"1px solid var(--rule)", cursor:"pointer" }}
+        onClick={() => setWaterAvailable(v => !v)}>
+        <div style={{ width:20, height:20, borderRadius:3, flexShrink:0,
+          border:`2px solid ${waterAvailable ? "var(--accent)" : "var(--rule)"}`,
+          background: waterAvailable ? "var(--accent)" : "var(--white)",
+          display:"flex", alignItems:"center", justifyContent:"center" }}>
+          {waterAvailable && (
+            <svg width="11" height="9" viewBox="0 0 11 9" fill="none">
+              <path d="M1 4.5l3.5 3.5 5.5-7" stroke="white" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+        </div>
+        <div>
+          <div style={{ fontSize:13, fontWeight:600, color:"var(--ink)" }}>
+            Water available on course
+          </div>
+          <div style={{ fontSize:11, color:"var(--ink3)" }}>
+            Reduces how many flasks you need to carry
+          </div>
+        </div>
+      </div>
+
+      {/* ── Fuel selection ────────────────────────────────── */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>What's in the vest</div>
+      <div style={{ fontSize:12, color:"var(--ink3)", marginBottom:10 }}>
+        Select the items you're planning to carry. Tap to toggle.
+      </div>
+
+      {allItems.length === 0 && (
+        <div style={{ fontSize:12, color:"var(--ink4)", fontStyle:"italic",
+          padding:"10px 12px", border:"1px dashed var(--rule)", borderRadius:"var(--r)",
+          marginBottom:12 }}>
+          No items in library yet — using 25g/item average.
+          Add products in the Race Day screen.
+        </div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:5, marginBottom:16 }}>
+        {allItems.map(item => {
+          const selected = selectedFuel.includes(item.name);
+          return (
+            <div key={item.name}
+              onClick={() => toggleFuel(item.name)}
+              style={{ display:"flex", alignItems:"center", gap:10,
+                padding:"9px 12px", borderRadius:"var(--r)", cursor:"pointer",
+                border:`2px solid ${selected ? "var(--accent)" : "var(--rule)"}`,
+                background: selected ? "var(--accent-light)" : "var(--white)",
+                transition:"all .15s", userSelect:"none" }}>
+              <div style={{ width:16, height:16, borderRadius:3, flexShrink:0,
+                border:`2px solid ${selected ? "var(--accent)" : "var(--rule)"}`,
+                background: selected ? "var(--accent)" : "var(--white)",
+                display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {selected && (
+                  <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                    <path d="M1 3.5l2.5 2.5 4.5-5" stroke="white" strokeWidth="1.8"
+                      strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:12, fontWeight:600,
+                  color: selected ? "var(--accent)" : "var(--ink)" }}>{item.name}</div>
+                <div style={{ fontSize:10, color:"var(--ink3)", fontFamily:"var(--mono)" }}>
+                  {item.carbs}g carbs
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ══ PLAN OUTPUT ═══════════════════════════════════════ */}
+      {plan && (
+        <div>
+          <hr className="rule" />
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+            textTransform:"uppercase", marginBottom:12 }}>Your plan</div>
+
+          {/* Summary strip */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:8, marginBottom:12 }}>
+            {[
+              { label:"Est. time",    value: plan.durationFmt,              sub:"at your target pace" },
+              { label:"Total carbs",  value: plan.carbsG > 0 ? `${plan.carbsG}g` : "None", sub:"required" },
+              { label:"Fluid",        value: `${plan.fluidMl}ml`,           sub:"to carry/drink" },
+              { label:"Fuel items",   value: plan.vestItems || "—",         sub:"in vest" },
+            ].map(({ label, value, sub }) => (
+              <div key={label} className="card" style={{ padding:"12px 14px" }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"var(--ink3)",
+                  textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>{label}</div>
+                <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:700,
+                  color:"var(--accent)", lineHeight:1 }}>{value}</div>
+                <div style={{ fontSize:10, color:"var(--ink4)", marginTop:2 }}>{sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Flasks */}
+          <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+            background:"var(--bg)", border:"1px solid var(--rule)", borderRadius:"var(--r)",
+            marginBottom:12 }}>
+            <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:700,
+              color:"var(--ink)", minWidth:32 }}>{plan.flasks}</div>
+            <div>
+              <div style={{ fontSize:13, fontWeight:600, color:"var(--ink)" }}>
+                {plan.flasks === 1 ? "soft flask" : "soft flasks"}
+              </div>
+              <div style={{ fontSize:11, color:"var(--ink3)" }}>
+                {waterAvailable ? "Water on course — carry less, refill as needed" : "Carry enough to last between water stops"}
+              </div>
+            </div>
+          </div>
+
+          {/* Carb strategy note */}
+          <div style={{ padding:"10px 14px", background:"var(--gold-pale)",
+            border:"1px solid var(--gold-dark)", borderRadius:"var(--r)", marginBottom:12 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"var(--gold-dark)",
+              textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>Strategy</div>
+            <div style={{ fontSize:13, color:"var(--ink)", lineHeight:1.5 }}>{plan.carbsNote}</div>
+          </div>
+
+          {/* Fuel timings */}
+          {plan.timings.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+                textTransform:"uppercase", marginBottom:8 }}>Take-fuel reminders</div>
+              {plan.timings.map((t, i) => (
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:12,
+                  padding:"9px 12px", background:"var(--white)",
+                  border:"1px solid var(--rule)", borderRadius:"var(--r)", marginBottom:5 }}>
+                  <div style={{ fontFamily:"var(--mono)", fontSize:14, fontWeight:700,
+                    color:"var(--accent)", minWidth:48, flexShrink:0 }}>
+                    {t.atMin}min
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:"var(--ink)" }}>{t.label}</div>
+                    <div style={{ fontSize:10, color:"var(--ink3)", fontFamily:"var(--mono)" }}>
+                      {t.carbs}g carbs
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Tips */}
+          {plan.tips.length > 0 && (
+            <div style={{ padding:"12px 14px", background:"var(--bg)",
+              border:"1px solid var(--rule)", borderRadius:"var(--r)" }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)",
+                textTransform:"uppercase", letterSpacing:.8, marginBottom:8 }}>Tips</div>
+              {plan.tips.map((tip, i) => (
+                <div key={i} style={{ fontSize:12, color:"var(--ink2)", marginBottom:6,
+                  paddingLeft:12, borderLeft:"2px solid var(--rule)", lineHeight:1.5 }}>
+                  {tip}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Empty state — prompt to fill in distance + pace */}
+      {!plan && (
+        <div style={{ padding:"20px var(--pad-x)", background:"var(--bg)",
+          border:"2px dashed var(--rule)", borderRadius:"var(--r)",
+          textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic" }}>
+          Enter a distance and pace above to generate your plan
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 //  NUTRITION SCANNER
 //  Inline URL scanner for product nutrition pages.
 //  Scans a URL, extracts carbs, lets user confirm then add to inventory.
@@ -4716,6 +5033,7 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
             {id:"stats",   label:"Stats"},
             {id:"log",     label:"Log"},
             {id:"event",   label:"Event"},
+            {id:"fuel",    label:"Fuel"},
             {id:"race",    label:"Race Day"},
             {id:"profile", label:"Profile"},
           ].map(t => (
@@ -6273,6 +6591,10 @@ export default function App() {
               <button onClick={resetAll} className="btn btn-g btn-sm">🗑 Reset everything</button>
             </div>
           </div>
+        )}
+
+        {screen === "fuel" && hasData && (
+          <RunPlannerScreen nutritionLib={nutritionLib} />
         )}
 
         {screen === "race" && hasData && (
