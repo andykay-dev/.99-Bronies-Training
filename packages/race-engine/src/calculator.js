@@ -10,6 +10,7 @@
 import { todaySydney, parseLocalDate } from "@bronies/engine-core";
 import { computeLegFuelling } from "./fuelling.js";
 import { recommendGear } from "./gear.js";
+import { recommendAidStationFuel } from "./aidStationFuel.js";
 
 /**
  * @typedef {object} RacePlan
@@ -52,6 +53,17 @@ export function generateRacePlan(race, strategy) {
 
   // Per-leg fuelling
   const legs = validLegs.map(leg => computeLegFuelling(leg, totalDistKm, strategy));
+
+  // Aid station suggestions — needs cumulative distance AND cumulative time
+  // at the START of each leg (caffeine timing is time-based, substitutions
+  // are distance/effort-based).
+  let cumulativeKm = 0;
+  let cumulativeMins = 0;
+  for (const leg of legs) {
+    leg.aidStation = recommendAidStationFuel(leg, cumulativeKm, cumulativeMins, strategy);
+    cumulativeKm += leg.km;
+    cumulativeMins += leg.legMins;
+  }
 
   // Summary stats across legs
   const totalItems = legs.reduce((acc, l) => acc + l.vestItems, 0);

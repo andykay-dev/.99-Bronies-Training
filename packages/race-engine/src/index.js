@@ -6,6 +6,7 @@
 export { generateRacePlan }  from "./calculator.js";
 export { computeLegFuelling } from "./fuelling.js";
 export { recommendGear }      from "./gear.js";
+export { recommendAidStationFuel } from "./aidStationFuel.js";
 export { parseAidStations, parseBulkCheckpoints } from "./parseAidStations.js";
 export { planRun }            from "./planRun.js";
 
@@ -17,4 +18,7 @@ export {
   FUEL_LOOKUP,
   DEFAULT_STRATEGY,
   DEFAULT_LEG,
+  CAFFEINE_USEFUL_FROM_KM,
+  CAFFEINE_USEFUL_FROM_MINS,
+  AID_STATION_ITEMS,
 } from "./constants.js";

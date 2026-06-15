@@ -32,10 +32,8 @@ import {
   planRun,
 } from "@bronies/race-engine";
 
-import {
-  processScan,
-  SCAN_INTENTS,
-} from "@bronies/scanner-engine";
+import { parseWorkoutText, fmtPaceStr } from "./parseWorkout.js";
+import { buildWorkoutJson }             from "./buildWorkoutJson.js";
 
 // ─────────────────────────────────────────────────────────────
 //  useScan — reusable hook for the /api/scan serverless function
@@ -134,7 +132,7 @@ const HORSE_FOOTER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYA
 
 // Skin cycle order — add new skins here to make them available in rotation.
 // "surprise" skins will be added here when ready.
-const SKINS = ["default", "8bit", "dark"];
+const SKINS = ["default", "8bit", "dark", "socceroos"];
 
 function loadPixelFont() {
   if (document.getElementById("pixel-font-link")) return;
@@ -421,6 +419,87 @@ const G = ({ skin }) => {
       body[data-skin="dark"] select option{background:#111318;color:#E4E8F0;}
       body[data-skin="dark"] ::-webkit-scrollbar{width:6px;background:#0A0B0E;}
       body[data-skin="dark"] ::-webkit-scrollbar-thumb{background:#1E2B38;border-radius:3px;}
+
+      /* ── Socceroos skin — World Cup 2026 special edition ──────────────────
+         Active until 19 July 2026. Gold & Green. Come on, Aussie!
+      ── */
+      body[data-skin="socceroos"]{
+        --ink:#1A1A1A; --ink2:#003D1F; --ink3:#006633; --ink4:#5A8F6E;
+        --rule:#A8D5B5; --bg:#F0FFF4; --white:#FFFFFF; --black:#003D1F;
+        --accent:#006633; --accent-light:#D4EDDA;
+        --warn:#CC0000; --yellow:#FFD700; --blue:#003D1F;
+        --hud:#003D1F; --nav:#006633; --navtab:#008040;
+        --gold:#FFD700; --gold-dark:#C8A800; --gold-pale:#FFFDE0;
+        --card-shadow:3px 3px 0 #A8D5B5;
+        --sans:'IBM Plex Sans',sans-serif;
+        --mono:'IBM Plex Mono',monospace;
+        --display:'Bebas Neue',sans-serif;
+        --r:6px;
+        background:#F0FFF4;
+      }
+
+      /* Subtle pitch-stripe background */
+      body[data-skin="socceroos"]{
+        background-image:repeating-linear-gradient(
+          180deg,
+          transparent 0px, transparent 40px,
+          rgba(0,102,51,0.04) 40px, rgba(0,102,51,0.04) 80px
+        );
+      }
+
+      body[data-skin="socceroos"] .card{
+        background:#fff;border-color:#A8D5B5;
+        box-shadow:3px 3px 0 #A8D5B5;
+      }
+      body[data-skin="socceroos"] .card-l{border-left-color:#FFD700;border-left-width:4px;}
+
+      body[data-skin="socceroos"] .btn-p{
+        background:#006633;border:2px solid #003D1F;color:#FFD700;
+        box-shadow:3px 3px 0 #003D1F;font-weight:700;
+      }
+      body[data-skin="socceroos"] .btn-p:hover:not(:disabled){
+        background:#003D1F;
+      }
+      body[data-skin="socceroos"] .btn-o{
+        background:#fff;border:2px solid #006633;color:#006633;
+        box-shadow:2px 2px 0 #006633;
+      }
+      body[data-skin="socceroos"] .btn-o:hover:not(:disabled){
+        background:#006633;color:#FFD700;
+      }
+      body[data-skin="socceroos"] .btn-g{
+        background:#fff;border:1px solid #A8D5B5;color:#5A8F6E;
+      }
+      body[data-skin="socceroos"] .btn-g:hover:not(:disabled){
+        background:#F0FFF4;color:#006633;
+      }
+
+      body[data-skin="socceroos"] .inp,
+      body[data-skin="socceroos"] .sel{
+        background:#fff;border-color:#A8D5B5;color:#1A1A1A;
+      }
+      body[data-skin="socceroos"] .inp:focus{
+        border-color:#006633;box-shadow:0 0 0 2px rgba(0,102,51,0.15);
+      }
+      body[data-skin="socceroos"] .inp::placeholder{color:#A8D5B5;}
+      body[data-skin="socceroos"] label.lbl{color:#5A8F6E;letter-spacing:1px;}
+
+      /* Nav header — green with gold text */
+      body[data-skin="socceroos"] .nav-tab{
+        color:#FFD700;font-weight:700;letter-spacing:.5px;
+      }
+
+      /* Accent / selected tab highlight */
+      body[data-skin="socceroos"] .nav-tab.active,
+      body[data-skin="socceroos"] .nav-tab[aria-selected="true"]{
+        background:#FFD700;color:#003D1F;
+      }
+
+      body[data-skin="socceroos"] .rule{border-top-color:#A8D5B5;}
+      body[data-skin="socceroos"] .spin{border-top-color:#FFD700;}
+      body[data-skin="socceroos"] select option{background:#fff;color:#1A1A1A;}
+      body[data-skin="socceroos"] ::-webkit-scrollbar{width:6px;background:#F0FFF4;}
+      body[data-skin="socceroos"] ::-webkit-scrollbar-thumb{background:#A8D5B5;border-radius:3px;}
     `}</style>
   );
 };
@@ -3672,6 +3751,237 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 //  Ad-hoc fuelling plan for a training run or tune-up race.
 //  No course needed — just distance, pace, conditions, fuel.
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  WORKOUT CREATOR SCREEN
+//  Plain-language → Garmin workout JSON
+// ─────────────────────────────────────────────────────────────
+function WorkoutCreatorScreen() {
+  const [text,       setText]       = useState("");
+  const [parsed,     setParsed]     = useState(null);  // { name, steps, errors }
+  const [workoutName, setWorkoutName] = useState("");
+  const [generated,  setGenerated]  = useState(false);
+
+  const EXAMPLES = [
+    {
+      label: "Simple reps",
+      text: `10×800m Session
+2km warmup @6:00
+10x 800m @ 4:15 with 90s rest
+2km cool down @6:00`,
+    },
+    {
+      label: "Complex repeats",
+      text: `Lactate Float Set
+2km warm up @6:00
+3x (1km hard @4:15, 1km easy @5:15, 400m hard @3:45, 200m float @4:25, 400m hard @3:45, 2min rest)
+2km cool down @6:00`,
+    },
+    {
+      label: "Time-based fartlek",
+      text: `Fartlek 5×2min
+2km warmup @6:00
+5x (2min hard @4:00, 1min easy @5:30)
+2km cooldown @6:00`,
+    },
+    {
+      label: "Threshold run",
+      text: `Threshold Run
+2km warm up @6:00
+6km tempo @4:30
+2km cool down @6:00`,
+    },
+  ];
+
+  function handleParse() {
+    if (!text.trim()) return;
+    const result = parseWorkoutText(text);
+    setParsed(result);
+    setWorkoutName(result.name || "Custom Workout");
+    setGenerated(false);
+  }
+
+  function handleDownload() {
+    if (!parsed || parsed.steps.length === 0) return;
+    const json = buildWorkoutJson(workoutName || parsed.name, parsed.steps);
+    const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `${(workoutName || "workout").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setGenerated(true);
+  }
+
+  const hasSteps  = parsed && parsed.steps.length > 0;
+  const hasErrors = parsed && parsed.errors.length > 0;
+
+  // ── Step preview renderer ────────────────────────────────
+  function StepBadge({ kind }) {
+    const COLOURS = {
+      warmup:   { bg:"#e8f4fd", color:"#1a73e8", label:"WU" },
+      cooldown: { bg:"#e8f4fd", color:"#1a73e8", label:"CD" },
+      interval: { bg:"#fde8e8", color:"#d32f2f", label:"INT" },
+      recovery: { bg:"#e8fde8", color:"#388e3c", label:"REC" },
+      rest:     { bg:"#f5f5f5", color:"#757575", label:"REST" },
+      repeat:   { bg:"#fff8e1", color:"#f57f17", label:"RPT" },
+    };
+    const c = COLOURS[kind] || COLOURS.interval;
+    return (
+      <span style={{ fontSize:9, fontWeight:700, padding:"2px 5px",
+        borderRadius:3, background:c.bg, color:c.color,
+        fontFamily:"var(--mono)", letterSpacing:.5, flexShrink:0 }}>
+        {c.label}
+      </span>
+    );
+  }
+
+  function renderStep(step, depth = 0) {
+    if (step.kind === "repeat") {
+      return (
+        <div style={{ marginBottom:6 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8,
+            padding:"7px 10px",
+            background:"#fff8e1", border:"1px solid #f0c000",
+            borderRadius:"var(--r)" }}>
+            <StepBadge kind="repeat" />
+            <span style={{ fontSize:12, fontWeight:700, color:"var(--ink)" }}>
+              Repeat ×{step.reps}
+            </span>
+          </div>
+          <div style={{ marginLeft:16, marginTop:4, display:"flex", flexDirection:"column", gap:3 }}>
+            {step.children.map((c, i) => renderStep(c, depth + 1))}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div key={step.desc} style={{ display:"flex", alignItems:"center", gap:8,
+        padding:"7px 10px", background:"var(--white)",
+        border:"1px solid var(--rule)", borderRadius:"var(--r)", marginBottom:3 }}>
+        <StepBadge kind={step.kind} />
+        <span style={{ fontSize:12, color:"var(--ink)", flex:1 }}>
+          {step.desc}
+        </span>
+        {step.paceLabel && (
+          <span style={{ fontSize:10, fontFamily:"var(--mono)", color:"var(--ink3)",
+            flexShrink:0 }}>
+            @{step.paceLabel}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
+
+      {/* Header */}
+      <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
+        Workout Creator
+      </div>
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:20 }}>
+        Write your workout in plain language — download a Garmin-ready file.
+      </div>
+
+      {/* Syntax guide */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>How to write it</div>
+      <div className="card" style={{ padding:12, marginBottom:16,
+        fontFamily:"var(--mono)", fontSize:11, color:"var(--ink2)", lineHeight:1.9 }}>
+        <div><span style={{ color:"var(--accent)", fontWeight:700 }}>Distance + pace:</span>  2km warmup @6:00  ·  400m @4:15</div>
+        <div><span style={{ color:"var(--accent)", fontWeight:700 }}>Distance + effort:</span>  1km hard  ·  400m easy  ·  200m float</div>
+        <div><span style={{ color:"var(--accent)", fontWeight:700 }}>Time-based:</span>  2min rest  ·  90s recovery  ·  2min hard @4:00</div>
+        <div><span style={{ color:"var(--accent)", fontWeight:700 }}>Simple repeat:</span>  10x 400m @4:00 with 90s rest</div>
+        <div><span style={{ color:"var(--accent)", fontWeight:700 }}>Complex repeat:</span>  3x (1km hard @4:15, 400m easy, 2min rest)</div>
+        <div><span style={{ color:"var(--ink4)" }}>First line = workout name if no distances/paces</span></div>
+      </div>
+
+      {/* Example buttons */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>Examples</div>
+      <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:16 }}>
+        {EXAMPLES.map(ex => (
+          <button key={ex.label}
+            onClick={() => { setText(ex.text); setParsed(null); setGenerated(false); }}
+            className="btn btn-o btn-sm">
+            {ex.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Input textarea */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:8 }}>Your workout</div>
+      <textarea
+        className="inp"
+        placeholder={`2km warmup @6:00\n10x 400m @4:00 with 90s rest\n2km cool down @6:00`}
+        value={text}
+        onChange={e => { setText(e.target.value); setParsed(null); setGenerated(false); }}
+        style={{ width:"100%", minHeight:140, fontFamily:"var(--mono)",
+          fontSize:12, resize:"vertical", boxSizing:"border-box",
+          lineHeight:1.8, marginBottom:8 }} />
+
+      <button className="btn btn-p" style={{ width:"100%", marginBottom:20 }}
+        disabled={!text.trim()}
+        onClick={handleParse}>
+        Preview workout →
+      </button>
+
+      {/* Parse errors */}
+      {hasErrors && (
+        <div style={{ marginBottom:12, padding:"8px 12px",
+          background:"#fff0f0", border:"1px solid var(--warn)",
+          borderRadius:"var(--r)", fontSize:11, color:"var(--warn)", lineHeight:1.6 }}>
+          {parsed.errors.map((e, i) => <div key={i}>⚠ {e}</div>)}
+        </div>
+      )}
+
+      {/* Preview */}
+      {hasSteps && (
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+            textTransform:"uppercase", marginBottom:8 }}>Preview</div>
+
+          {/* Workout name edit */}
+          <div style={{ marginBottom:12 }}>
+            <label className="lbl">Workout name</label>
+            <input className="inp" value={workoutName}
+              onChange={e => setWorkoutName(e.target.value)} />
+          </div>
+
+          {/* Step list */}
+          <div style={{ marginBottom:16 }}>
+            {parsed.steps.map((step, i) => (
+              <div key={i}>{renderStep(step)}</div>
+            ))}
+          </div>
+
+          {/* Download button */}
+          <button className="btn btn-p" style={{ width:"100%" }}
+            onClick={handleDownload}>
+            ⬇ Download Garmin workout (.json)
+          </button>
+
+          {generated && (
+            <div style={{ marginTop:10, fontSize:12, color:"var(--ink3)",
+              textAlign:"center", lineHeight:1.5 }}>
+              ✓ Downloaded. Go to{" "}
+              <a href="https://connect.garmin.com/modern/training/workouts"
+                target="_blank" rel="noopener noreferrer"
+                style={{ color:"var(--accent)" }}>
+                Garmin Connect → Workouts
+              </a>
+              {" "}and import the file.
+            </div>
+          )}
+        </div>
+      )}
+
+    </div>
+  );
+}
+
 function RunPlannerScreen({ nutritionLib = [] }) {
 
   // ── Inputs ────────────────────────────────────────────────
@@ -4838,6 +5148,31 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
               <span style={{ fontSize:12, color:"var(--ink2)" }}>{leg.stock}</span>
             </div>
           )}
+
+          {/* Aid station fuel suggestions — substitutions + caffeine */}
+          {leg.aidStation && (leg.aidStation.substitutions.length > 0 || leg.aidStation.caffeine.suggestion) && (
+            <div style={{ padding:"10px 14px", display:"flex", flexDirection:"column", gap:6,
+              borderTop: leg.stock ? "1px solid var(--rule)" : "none" }}>
+              {leg.aidStation.substitutions.map((s, si) => (
+                <div key={`sub-${si}`} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
+                  <span style={{ fontSize:14, lineHeight:1.4, flexShrink:0 }}>🍌</span>
+                  <span style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.5 }}>{s}</span>
+                </div>
+              ))}
+              {leg.aidStation.caffeine.suggestion && (
+                <div style={{ display:"flex", gap:8, alignItems:"flex-start",
+                  padding: leg.aidStation.caffeine.available && leg.aidStation.substitutions.length === 0
+                    ? 0 : "6px 0 0 0",
+                  borderTop: leg.aidStation.substitutions.length > 0 ? "1px dashed var(--rule)" : "none",
+                  marginTop: leg.aidStation.substitutions.length > 0 ? 2 : 0 }}>
+                  <span style={{ fontSize:14, lineHeight:1.4, flexShrink:0 }}>☕</span>
+                  <span style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.5 }}>
+                    {leg.aidStation.caffeine.suggestion}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ))}
 
@@ -5029,13 +5364,14 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
         <div style={{display:"flex",padding:"0 var(--pad-x)",gap:20,background:"var(--navtab)",
           borderBottom:"2px solid var(--nav)"}}>
           {[
-            {id:"plan",    label:"Plan"},
-            {id:"stats",   label:"Stats"},
-            {id:"log",     label:"Log"},
-            {id:"event",   label:"Event"},
-            {id:"fuel",    label:"Fuel"},
-            {id:"race",    label:"Race Day"},
-            {id:"profile", label:"Profile"},
+            {id:"plan",      label:"Plan"},
+            {id:"stats",     label:"Stats"},
+            {id:"log",       label:"Log"},
+            {id:"event",     label:"Event"},
+            {id:"fuel",      label:"Fuel"},
+            {id:"workouts",  label:"Workouts"},
+            {id:"race",      label:"Race Day"},
+            {id:"profile",   label:"Profile"},
           ].map(t => (
             <button key={t.id} onClick={() => onNav(t.id)} className={`nav-tab${screen===t.id?" active":""}`}>
               {t.label}
@@ -6026,7 +6362,21 @@ export default function App() {
     try { const r = await store.get("bep6_overrides"); if (r) setSessionOverrides(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
-    try { const r = await store.get("bep6_skin");      if (r) { setSkinState(r.value); document.body.setAttribute("data-skin", r.value); } } catch {}
+    try {
+      const r = await store.get("bep6_skin");
+      if (r) {
+        setSkinState(r.value);
+        document.body.setAttribute("data-skin", r.value);
+      } else {
+        // Auto-apply Socceroos skin during FIFA World Cup 2026
+        // Tournament ends 19 July 2026
+        const worldCupEnd = new Date("2026-07-19T23:59:59");
+        if (new Date() <= worldCupEnd) {
+          setSkinState("socceroos");
+          document.body.setAttribute("data-skin", "socceroos");
+        }
+      }
+    } catch {}
     try { const r = await store.get("bep6_racePlan");      if (r) setRacePlanState(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_nutritionLib");  if (r) setNutritionLib(JSON.parse(r.value)); } catch {}
   }
@@ -6365,6 +6715,26 @@ export default function App() {
         <Header screen={screen} onNav={s => { setSelWeek(null); setScreen(s); }}
           hasData={hasData} skin={skin} setSkin={setSkin} onFeedback={() => setFeedbackOpen(true)} userEmail={userEmail} onLogout={handleLogout} onSignIn={() => setShowAuth(true)}/>
 
+        {/* ── World Cup 2026 Socceroos banner — time-limited until 19 Jul 2026 ── */}
+        {skin === "socceroos" && (() => {
+          const worldCupEnd = new Date("2026-07-19T23:59:59");
+          if (new Date() > worldCupEnd) return null;
+          const daysLeft = Math.ceil((worldCupEnd - new Date()) / (1000 * 60 * 60 * 24));
+          return (
+            <div style={{ background:"#006633", color:"#FFD700", fontSize:11, fontWeight:700,
+              letterSpacing:.8, textTransform:"uppercase", textAlign:"center",
+              padding:"6px var(--pad-x)", display:"flex", alignItems:"center",
+              justifyContent:"center", gap:8 }}>
+              <span>⚽</span>
+              <span>FIFA World Cup 2026 — Go Socceroos!</span>
+              <span style={{ fontWeight:400, fontSize:10, opacity:.8 }}>
+                {daysLeft > 0 ? `${daysLeft}d to go` : "Today's the day!"}
+              </span>
+              <span>⚽</span>
+            </div>
+          );
+        })()}
+
         {screen === "welcome" && (
           <WelcomeScreen onStart={() => setScreen("onboarding")} onDemo={() => setShowDemo(true)}/>
         )}
@@ -6595,6 +6965,10 @@ export default function App() {
 
         {screen === "fuel" && hasData && (
           <RunPlannerScreen nutritionLib={nutritionLib} />
+        )}
+
+        {screen === "workouts" && hasData && (
+          <WorkoutCreatorScreen />
         )}
 
         {screen === "race" && hasData && (

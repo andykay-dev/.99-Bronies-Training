@@ -369,7 +369,7 @@ function buildStock(station) {
   const parts = [];
   if (station.type === "water_point") parts.push("Water, Coca-cola, Lollies");
   if (station.type === "aid_station") parts.push("Water, Coca-cola, Trail Brew, Lollies, Chips, Bananas, Watermelon");
-  if (station.type === "finish")      parts.push("Full finish line spread");
+  if (station.type === "finish")      parts.push("Water, Coca-cola, Ginger beer, Trail Brew, Lollies, Chips, Bananas, Watermelon");
   if (station.dropBags)  parts.push("Drop bags ✓");
   if (station.supportCrew) parts.push("Crew ✓");
   if (station.toilet)    parts.push("Toilets ✓");
