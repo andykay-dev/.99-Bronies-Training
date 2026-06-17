@@ -4737,6 +4737,30 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
   const totalDistKm  = validLegs.reduce((a, l) => a + (parseFloat(l.km) || 0), 0);
   const totalAscentM = validLegs.reduce((a, l) => a + (parseInt(l.gainM, 10) || 0), 0);
 
+  // ── section collapse state ────────────────────────────────
+  // Default open. Auto-collapse Course Setup once legs are set, auto-collapse
+  // Fuel Inventory once items are added — so the plan output is the focus.
+  const hasLegs      = validLegs.length > 0;
+  const hasFuel      = (strategy.fuelInventory || []).length > 0;
+  const [setupOpen,  setSetupOpen]  = useState(true);
+  const [fuelOpen,   setFuelOpen]   = useState(true);
+
+  // One-time auto-collapse when data becomes present for the first time
+  const [autoCollapsedSetup, setAutoCollapsedSetup] = useState(false);
+  const [autoCollapsedFuel,  setAutoCollapsedFuel]  = useState(false);
+  useEffect(() => {
+    if (hasLegs && !autoCollapsedSetup) {
+      setSetupOpen(false);
+      setAutoCollapsedSetup(true);
+    }
+  }, [hasLegs]);
+  useEffect(() => {
+    if (hasFuel && !autoCollapsedFuel) {
+      setFuelOpen(false);
+      setAutoCollapsedFuel(true);
+    }
+  }, [hasFuel]);
+
   // ── target time helpers ───────────────────────────────────
   const targetH   = Math.floor(strategy.targetHours || 0);
   const targetMin = Math.round(((strategy.targetHours || 0) - targetH) * 60);
@@ -4757,10 +4781,33 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
       </div>
 
       {/* ══ SECTION 1: Course Setup ══════════════════════════ */}
-      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
-        textTransform:"uppercase", marginBottom:10 }}>
-        Course Setup
-      </div>
+      <button
+        onClick={() => setSetupOpen(v => !v)}
+        style={{ width:"100%", display:"flex", justifyContent:"space-between",
+          alignItems:"center", background:"none", border:"none", cursor:"pointer",
+          padding:"0 0 8px 0", textAlign:"left" }}>
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+            textTransform:"uppercase" }}>Course Setup</div>
+          {!setupOpen && (
+            <div style={{ fontSize:12, color:"var(--ink2)", marginTop:3, lineHeight:1.4 }}>
+              {race.title
+                ? <><span style={{ fontWeight:600 }}>{race.title}</span>
+                    {race.date ? ` · ${new Date(race.date).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"})}` : ""}
+                    {validLegs.length > 0 ? ` · ${totalDistKm.toFixed(1)}km` : ""}
+                    {strategy.targetHours ? ` · ${Math.floor(strategy.targetHours)}h ${Math.round((strategy.targetHours % 1) * 60)}min` : ""}
+                  </>
+                : <span style={{ color:"var(--ink4)", fontStyle:"italic" }}>Tap to set up your race</span>
+              }
+            </div>
+          )}
+        </div>
+        <div style={{ fontSize:14, color:"var(--ink4)", flexShrink:0, marginLeft:8 }}>
+          {setupOpen ? "▲" : "▼"}
+        </div>
+      </button>
+
+      {setupOpen && (<div>
 
       {/* ── Import checkpoints ───────────────────────────────── */}
       <div className="card" style={{ padding:14, marginBottom:12 }}>
@@ -5008,18 +5055,51 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
         </div>
       ))}
 
-      <button className="btn btn-o" style={{ width:"100%", marginBottom:24 }} onClick={addLeg}>
+      <button className="btn btn-o" style={{ width:"100%", marginBottom:12 }} onClick={addLeg}>
         + Add checkpoint
       </button>
 
+      </div>)} {/* end setupOpen */}
+
+      <div style={{ borderBottom:"1px solid var(--rule)", marginBottom:16 }} />
+
       {/* ══ SECTION 2: Fuel Inventory ════════════════════════ */}
-      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
-        textTransform:"uppercase", marginBottom:10 }}>
-        Fuel Inventory
-      </div>
-      <div style={{ fontSize:12, color:"var(--ink3)", fontStyle:"italic", marginBottom:12 }}>
-        What's going in the vest. Mix and match — the plan uses the average carbs per item.
-      </div>
+      <button
+        onClick={() => setFuelOpen(v => !v)}
+        style={{ width:"100%", display:"flex", justifyContent:"space-between",
+          alignItems:"center", background:"none", border:"none", cursor:"pointer",
+          padding:"0 0 8px 0", textAlign:"left" }}>
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+            textTransform:"uppercase" }}>Fuel Inventory</div>
+          {!fuelOpen && (
+            <div style={{ fontSize:12, color:"var(--ink2)", marginTop:3 }}>
+              {(strategy.fuelInventory || []).length > 0
+                ? <>
+                    <span style={{ fontWeight:600 }}>
+                      {(strategy.fuelInventory || []).filter(i => i.type !== "drink_mix").length} solid item{(strategy.fuelInventory || []).filter(i => i.type !== "drink_mix").length !== 1 ? "s" : ""}
+                    </span>
+                    {(strategy.fuelInventory || []).some(i => i.type === "drink_mix") &&
+                      <span style={{ color:"var(--ink3)" }}>
+                        {" · "}{(strategy.fuelInventory || []).filter(i => i.type === "drink_mix").length} drink mix
+                      </span>
+                    }
+                    <span style={{ color:"var(--ink3)" }}>
+                      {" · "}{(strategy.fuelInventory || []).slice(0,2).map(i => i.name).join(", ")}
+                      {(strategy.fuelInventory || []).length > 2 ? `…` : ""}
+                    </span>
+                  </>
+                : <span style={{ color:"var(--ink4)", fontStyle:"italic" }}>Tap to add fuel items</span>
+              }
+            </div>
+          )}
+        </div>
+        <div style={{ fontSize:14, color:"var(--ink4)", flexShrink:0, marginLeft:8 }}>
+          {fuelOpen ? "▲" : "▼"}
+        </div>
+      </button>
+
+      {fuelOpen && (<div>
 
       {/* Nutrition scanner */}
       <NutritionScanner onAdd={(name, carbs, sodiumMg) => {
@@ -5191,6 +5271,10 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
           </button>
         </div>
       </div>
+
+      </div>)} {/* end fuelOpen */}
+
+      <div style={{ borderBottom:"1px solid var(--rule)", marginBottom:16 }} />
 
       {/* ══ SECTION 3: Race Plan Output ══════════════════════ */}
       <RacePlanOutput race={race} strategy={strategy} validLegs={validLegs} onChange={onChange} racePlan={racePlan} />
