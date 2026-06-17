@@ -3830,7 +3830,63 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 //  WORKOUT CREATOR SCREEN
 //  Plain-language → Garmin workout JSON
 // ─────────────────────────────────────────────────────────────
-function WorkoutCreatorScreen() {
+// ─────────────────────────────────────────────────────────────
+//  BRONIE TOOLS SCREEN
+//  Hub page for tools used less frequently than the main planner.
+//  Currently: Run Fuelling Planner + Workout Creator.
+// ─────────────────────────────────────────────────────────────
+function BronieToolsScreen({ onNav }) {
+  const TOOLS = [
+    {
+      id:    "fuel",
+      icon:  "🧪",
+      title: "Run Fuel Planner",
+      desc:  "Quick fuelling plan for any training run or tune-up race. Enter distance, pace and what's in your vest — get timing reminders and fluid targets.",
+    },
+    {
+      id:    "workouts",
+      icon:  "⚡",
+      title: "Workout Creator",
+      desc:  "Write a workout in plain language and download a Garmin-ready file with coaching notes on every step.",
+    },
+  ];
+
+  return (
+    <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
+      <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
+        Bronie Tools
+      </div>
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:24 }}>
+        Extras for when you need them — planning fuel, building workouts.
+      </div>
+
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        {TOOLS.map(tool => (
+          <button
+            key={tool.id}
+            onClick={() => onNav(tool.id)}
+            className="card"
+            style={{ padding:18, textAlign:"left", cursor:"pointer", width:"100%",
+              border:"2px solid var(--rule)", background:"var(--white)",
+              borderRadius:"var(--r)", display:"flex", alignItems:"flex-start", gap:16 }}>
+            <div style={{ fontSize:32, lineHeight:1, flexShrink:0 }}>{tool.icon}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:15, fontWeight:700, color:"var(--ink)", marginBottom:4 }}>
+                {tool.title}
+              </div>
+              <div style={{ fontSize:12, color:"var(--ink3)", lineHeight:1.5 }}>
+                {tool.desc}
+              </div>
+            </div>
+            <div style={{ fontSize:18, color:"var(--ink4)", flexShrink:0, alignSelf:"center" }}>›</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WorkoutCreatorScreen({ onBack }) {
   const [text,       setText]       = useState("");
   const [parsed,     setParsed]     = useState(null);  // { name, steps, errors }
   const [workoutName, setWorkoutName] = useState("");
@@ -3951,6 +4007,15 @@ function WorkoutCreatorScreen() {
   return (
     <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
 
+      {/* Back link */}
+      {onBack && (
+        <button onClick={onBack}
+          style={{ background:"none", border:"none", cursor:"pointer", padding:"0 0 12px 0",
+            fontSize:12, color:"var(--ink3)", display:"flex", alignItems:"center", gap:4 }}>
+          ‹ Bronie Tools
+        </button>
+      )}
+
       {/* Header */}
       <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
         Workout Creator
@@ -4057,7 +4122,7 @@ function WorkoutCreatorScreen() {
   );
 }
 
-function RunPlannerScreen({ nutritionLib = [] }) {
+function RunPlannerScreen({ nutritionLib = [], onBack }) {
 
   // ── Inputs ────────────────────────────────────────────────
   const [distKm,         setDistKm]         = useState("");
@@ -4068,7 +4133,7 @@ function RunPlannerScreen({ nutritionLib = [] }) {
   const [selectedFuel,   setSelectedFuel]    = useState([]); // names of items selected for this run
 
   // Merge library + built-ins for fuel selection
-  const builtins   = Object.entries(FUEL_LOOKUP).map(([name, carbs]) => ({ name, carbs, source:"builtin" }));
+  const builtins   = Object.entries(FUEL_LOOKUP).map(([name, meta]) => ({ name, carbs: meta.carbs, type: meta.type || "solid", source:"builtin" }));
   const libNames   = new Set(nutritionLib.map(i => i.name.toLowerCase()));
   const allItems   = [
     ...nutritionLib,
@@ -4118,6 +4183,15 @@ function RunPlannerScreen({ nutritionLib = [] }) {
 
   return (
     <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
+
+      {/* Back link */}
+      {onBack && (
+        <button onClick={onBack}
+          style={{ background:"none", border:"none", cursor:"pointer", padding:"0 0 12px 0",
+            fontSize:12, color:"var(--ink3)", display:"flex", alignItems:"center", gap:4 }}>
+          ‹ Bronie Tools
+        </button>
+      )}
 
       {/* Header */}
       <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
@@ -4523,11 +4597,12 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
   const [fuelSearch,   setFuelSearch]   = useState("");
   const [customName,   setCustomName]   = useState("");
   const [customCarbs,  setCustomCarbs]  = useState("");
+  const [customType,   setCustomType]   = useState("solid"); // "solid" | "drink_mix"
   const [showManageLib, setShowManageLib] = useState(false);
 
   // Merge built-in presets + personal library into one unified list for the picker.
   // Library items override built-ins of the same name (user may have better data).
-  const builtinItems  = Object.entries(FUEL_LOOKUP).map(([name, carbs]) => ({ name, carbs, source:"builtin" }));
+  const builtinItems  = Object.entries(FUEL_LOOKUP).map(([name, meta]) => ({ name, carbs: meta.carbs, type: meta.type || "solid", source:"builtin" }));
   const libNames      = new Set(nutritionLib.map(i => i.name.toLowerCase()));
   const mergedOptions = [
     ...nutritionLib,
@@ -4540,9 +4615,8 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
     : mergedOptions;
 
   function addFromLibrary(item) {
-    // Don't add duplicates to the vest for this race
     if ((strategy.fuelInventory || []).some(i => i.name === item.name)) return;
-    const inv = [...(strategy.fuelInventory || []), { name: item.name, carbs: item.carbs }];
+    const inv = [...(strategy.fuelInventory || []), { name: item.name, carbs: item.carbs, type: item.type || "solid" }];
     updateStrategy({ fuelInventory: inv });
     setFuelSearch("");
   }
@@ -4550,13 +4624,11 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
   function addCustom() {
     const c = parseInt(customCarbs, 10);
     if (!customName.trim() || !c || c <= 0) return;
-    const item = { name: customName.trim(), carbs: c };
-    // Add to vest
+    const item = { name: customName.trim(), carbs: c, type: customType };
     const inv = [...(strategy.fuelInventory || []), item];
     updateStrategy({ fuelInventory: inv });
-    // Save to personal library
     if (onNutritionLibAdd) onNutritionLibAdd(item.name, item.carbs, null, "custom");
-    setCustomName(""); setCustomCarbs("");
+    setCustomName(""); setCustomCarbs(""); setCustomType("solid");
   }
 
   function removeFuel(i) {
@@ -4613,8 +4685,6 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
   function setTargetTime(h, m) {
     updateStrategy({ targetHours: (parseInt(h, 10) || 0) + (parseInt(m, 10) || 0) / 60 });
   }
-
-  const PRESET_OPTIONS = Object.keys(FUEL_LOOKUP);
 
   return (
     <div style={{ padding: "var(--pad-x)", paddingBottom: 40 }}>
@@ -5024,6 +5094,24 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
         <div style={{ fontSize:11, color:"var(--ink3)", marginBottom:8 }}>
           Saved to your library for future races
         </div>
+        {/* Type toggle */}
+        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+          {[
+            { v:"solid",    label:"🍫 Food / Gel",   sub:"eaten from vest pocket" },
+            { v:"drink_mix",label:"💧 Drink Mix",     sub:"added to flask at aid station" },
+          ].map(t => (
+            <button key={t.v}
+              onClick={() => setCustomType(t.v)}
+              style={{ flex:1, padding:"7px 8px", borderRadius:"var(--r)", cursor:"pointer",
+                border:`2px solid ${customType===t.v ? "var(--ink)" : "var(--rule)"}`,
+                background: customType===t.v ? "var(--ink)" : "var(--white)",
+                color: customType===t.v ? "#fff" : "var(--ink3)",
+                textAlign:"left", transition:"all .15s" }}>
+              <div style={{ fontSize:11, fontWeight:700 }}>{t.label}</div>
+              <div style={{ fontSize:9, opacity:.7, marginTop:1 }}>{t.sub}</div>
+            </button>
+          ))}
+        </div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr auto auto", gap:8, alignItems:"flex-end" }}>
           <div>
             <label className="lbl" style={{ marginBottom:4 }}>Name</label>
@@ -5065,6 +5153,19 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
 
   // Gear checked state — stored as an array of checked item strings in race.gearChecked
   const checkedSet = new Set(race.gearChecked || []);
+
+  // Leg card expand/collapse state — all collapsed by default for compact race-day view
+  const [expandedLegs, setExpandedLegs] = useState(new Set());
+  const [legsExpanded, setLegsExpanded] = useState(false);
+
+  // "Expand all / Collapse all" toggle
+  useEffect(() => {
+    if (legsExpanded) {
+      setExpandedLegs(new Set(plan.legs.map((_, i) => i)));
+    } else {
+      setExpandedLegs(new Set());
+    }
+  }, [legsExpanded, plan.legs.length]);
 
   function toggleGear(item) {
     const next = new Set(checkedSet);
@@ -5164,92 +5265,133 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
       </div>
 
       {/* ── Per-leg breakdown ───────────────────────────────── */}
-      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
-        textTransform:"uppercase", marginBottom:8 }}>
-        Leg Breakdown
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+        marginBottom:8 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+          textTransform:"uppercase" }}>Leg Breakdown</div>
+        <button onClick={() => setLegsExpanded(v => !v)}
+          style={{ fontSize:10, fontWeight:700, color:"var(--ink3)", background:"none",
+            border:"1px solid var(--rule)", borderRadius:"var(--r)",
+            padding:"3px 8px", cursor:"pointer", letterSpacing:.3 }}>
+          {legsExpanded ? "Collapse all ▲" : "Expand all ▼"}
+        </button>
       </div>
 
-      {plan.legs.map((leg, i) => (
-        <div key={i} className="card" style={{ marginBottom:10, overflow:"hidden" }}>
+      {plan.legs.map((leg, i) => {
+        const isOpen = expandedLegs.has(i);
+        return (
+          <div key={i} className="card" style={{ marginBottom:8, overflow:"hidden" }}>
 
-          {/* Leg header bar */}
-          <div style={{ background:"var(--ink)", padding:"10px 14px",
-            display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div>
-              <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--gold)",
-                fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:2 }}>
-                Leg {i + 1}
-              </div>
-              <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>
-                {leg.name || `Checkpoint ${i + 1}`}
-              </div>
-            </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700,
-                color:"var(--gold)", lineHeight:1 }}>
-                {fmtLegTime(leg.legMins)}
-              </div>
-              <div style={{ fontSize:10, color:"rgba(255,255,255,.55)", marginTop:2 }}>
-                {leg.km}km · +{leg.gainM}m
-              </div>
-            </div>
-          </div>
-
-          {/* Nutrition row */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)",
-            borderBottom:"1px solid var(--rule)" }}>
-            {[
-              { label:"Carbs",  value:`${leg.carbsG}g`,   sub:"required"  },
-              { label:"Fluid",  value:`${leg.fluidMl}ml`, sub:"required"  },
-              { label:"Items",  value:leg.vestItems,       sub:"carry in"  },
-              { label:"Flasks", value:leg.flasks,          sub:"soft flask" },
-            ].map(({ label, value, sub }) => (
-              <div key={label} style={{ padding:"10px 8px", textAlign:"center",
-                borderRight:"1px solid var(--rule)" }}>
-                <div style={{ fontFamily:"var(--mono)", fontSize:16, fontWeight:700,
-                  color:"var(--accent)", lineHeight:1 }}>{value}</div>
-                <div style={{ fontSize:9, color:"var(--ink3)", textTransform:"uppercase",
-                  letterSpacing:.5, fontWeight:600, marginTop:3 }}>{label}</div>
-                <div style={{ fontSize:9, color:"var(--ink4)", marginTop:1 }}>{sub}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Aid station stock */}
-          {leg.stock && (
-            <div style={{ padding:"8px 14px", background:"var(--bg)" }}>
-              <span style={{ fontSize:10, fontWeight:700, color:"var(--ink3)",
-                textTransform:"uppercase", letterSpacing:.5 }}>Aid station: </span>
-              <span style={{ fontSize:12, color:"var(--ink2)" }}>{leg.stock}</span>
-            </div>
-          )}
-
-          {/* Aid station fuel suggestions — substitutions + caffeine */}
-          {leg.aidStation && (leg.aidStation.substitutions.length > 0 || leg.aidStation.caffeine.suggestion) && (
-            <div style={{ padding:"10px 14px", display:"flex", flexDirection:"column", gap:6,
-              borderTop: leg.stock ? "1px solid var(--rule)" : "none" }}>
-              {leg.aidStation.substitutions.map((s, si) => (
-                <div key={`sub-${si}`} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
-                  <span style={{ fontSize:14, lineHeight:1.4, flexShrink:0 }}>🍌</span>
-                  <span style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.5 }}>{s}</span>
+            {/* Leg header — always visible, tap to toggle */}
+            <div onClick={() => setExpandedLegs(prev => {
+                const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next;
+              })}
+              style={{ background:"var(--ink)", padding:"10px 14px",
+                display:"flex", justifyContent:"space-between", alignItems:"center",
+                cursor:"pointer", userSelect:"none" }}>
+              <div>
+                {leg.cutoff && (
+                  <div style={{ fontSize:9, color:"var(--warn)", fontWeight:700,
+                    letterSpacing:.5, textTransform:"uppercase", marginBottom:2 }}>
+                    ⏱ {leg.cutoff}
+                  </div>
+                )}
+                <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--gold)",
+                  fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:1 }}>
+                  Leg {i + 1} · {leg.km}km{leg.gainM > 0 ? ` · +${leg.gainM}m` : ""}
                 </div>
-              ))}
-              {leg.aidStation.caffeine.suggestion && (
-                <div style={{ display:"flex", gap:8, alignItems:"flex-start",
-                  padding: leg.aidStation.caffeine.available && leg.aidStation.substitutions.length === 0
-                    ? 0 : "6px 0 0 0",
-                  borderTop: leg.aidStation.substitutions.length > 0 ? "1px dashed var(--rule)" : "none",
-                  marginTop: leg.aidStation.substitutions.length > 0 ? 2 : 0 }}>
-                  <span style={{ fontSize:14, lineHeight:1.4, flexShrink:0 }}>☕</span>
-                  <span style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.5 }}>
-                    {leg.aidStation.caffeine.suggestion}
-                  </span>
+                <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>
+                  {leg.name || `Checkpoint ${i + 1}`}
                 </div>
-              )}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700,
+                    color:"var(--gold)", lineHeight:1 }}>
+                    {fmtLegTime(leg.legMins)}
+                  </div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:2 }}>
+                    {leg.vestItems} solid{leg.vestItems !== 1 ? "s" : ""} · {leg.flasks} flask{leg.flasks !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <div style={{ fontSize:12, color:"rgba(255,255,255,.4)" }}>
+                  {isOpen ? "▲" : "▼"}
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-      ))}
+
+            {/* Collapsible detail */}
+            {isOpen && (
+              <>
+                {/* Nutrition grid */}
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)",
+                  borderBottom:"1px solid var(--rule)" }}>
+                  {[
+                    { label:"Carbs",  value:`${leg.carbsG}g`,   sub:"total needed" },
+                    { label:"Fluid",  value:`${leg.fluidMl}ml`, sub:"required"     },
+                    { label:"Solids", value:leg.vestItems,       sub:"carry in vest"},
+                    { label:"Flasks", value:leg.flasks,          sub:"for fluid"    },
+                  ].map(({ label, value, sub }) => (
+                    <div key={label} style={{ padding:"10px 8px", textAlign:"center",
+                      borderRight:"1px solid var(--rule)" }}>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:16, fontWeight:700,
+                        color:"var(--accent)", lineHeight:1 }}>{value}</div>
+                      <div style={{ fontSize:9, color:"var(--ink3)", textTransform:"uppercase",
+                        letterSpacing:.5, fontWeight:600, marginTop:3 }}>{label}</div>
+                      <div style={{ fontSize:9, color:"var(--ink4)", marginTop:1 }}>{sub}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Drink mix note */}
+                {leg.drinkMixNote && (
+                  <div style={{ padding:"7px 14px", background:"#EAF6FF",
+                    borderBottom:"1px solid #BBDEFB",
+                    display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:13, flexShrink:0 }}>💧</span>
+                    <span style={{ fontSize:11, color:"#1565C0", lineHeight:1.4 }}>
+                      {leg.drinkMixNote}
+                    </span>
+                  </div>
+                )}
+
+                {/* Aid station stock */}
+                {leg.stock && (
+                  <div style={{ padding:"8px 14px", background:"var(--bg)" }}>
+                    <span style={{ fontSize:10, fontWeight:700, color:"var(--ink3)",
+                      textTransform:"uppercase", letterSpacing:.5 }}>Aid station: </span>
+                    <span style={{ fontSize:12, color:"var(--ink2)" }}>{leg.stock}</span>
+                  </div>
+                )}
+
+                {/* Aid station suggestions */}
+                {leg.aidStation && (leg.aidStation.substitutions.length > 0 || leg.aidStation.caffeine.suggestion) && (
+                  <div style={{ padding:"10px 14px", display:"flex", flexDirection:"column", gap:6,
+                    borderTop: leg.stock ? "1px solid var(--rule)" : "none" }}>
+                    {leg.aidStation.substitutions.map((s, si) => (
+                      <div key={`sub-${si}`} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
+                        <span style={{ fontSize:14, lineHeight:1.4, flexShrink:0 }}>🍌</span>
+                        <span style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.5 }}>{s}</span>
+                      </div>
+                    ))}
+                    {leg.aidStation.caffeine.suggestion && (
+                      <div style={{ display:"flex", gap:8, alignItems:"flex-start",
+                        borderTop: leg.aidStation.substitutions.length > 0 ? "1px dashed var(--rule)" : "none",
+                        paddingTop: leg.aidStation.substitutions.length > 0 ? 6 : 0,
+                        marginTop: leg.aidStation.substitutions.length > 0 ? 2 : 0 }}>
+                        <span style={{ fontSize:14, lineHeight:1.4, flexShrink:0 }}>☕</span>
+                        <span style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.5 }}>
+                          {leg.aidStation.caffeine.suggestion}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
 
       {/* ── Totals summary card ──────────────────────────────── */}
       <div className="card" style={{ padding:14, marginBottom:16,
@@ -5440,12 +5582,12 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
           borderBottom:"2px solid var(--nav)"}}>
           {[
             {id:"plan",      label:"Plan"},
-            {id:"fuel",      label:"Fuel"},
-            {id:"workouts",  label:"Workouts"},
+            {id:"tools",     label:"Tools"},
             {id:"race",      label:"Race Day"},
             {id:"profile",   label:"Profile"},
           ].map(t => (
-            <button key={t.id} onClick={() => onNav(t.id)} className={`nav-tab${screen===t.id?" active":""}`}>
+            <button key={t.id} onClick={() => onNav(t.id)}
+              className={`nav-tab${(screen === t.id || (t.id === "tools" && (screen === "fuel" || screen === "workouts"))) ? " active" : ""}`}>
               {t.label}
             </button>
           ))}
@@ -7154,12 +7296,17 @@ export default function App() {
           </div>
         )}
 
+        {screen === "tools" && hasData && (
+          <BronieToolsScreen onNav={s => { setSelWeek(null); setScreen(s); }} />
+        )}
+
         {screen === "fuel" && hasData && (
-          <RunPlannerScreen nutritionLib={nutritionLib} />
+          <RunPlannerScreen nutritionLib={nutritionLib}
+            onBack={() => setScreen("tools")} />
         )}
 
         {screen === "workouts" && hasData && (
-          <WorkoutCreatorScreen />
+          <WorkoutCreatorScreen onBack={() => setScreen("tools")} />
         )}
 
         {screen === "race" && hasData && (

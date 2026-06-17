@@ -17,14 +17,15 @@ export const FLASK_ML = 500;
 
 /**
  * Preset fuel items with carb content per serving.
- * Key is display name, value is carbs in grams.
+ * type: "solid" = discrete food item carried in vest pocket (gel, bar, chew)
+ *       "drink_mix" = powder/liquid added to a flask at aid-station fill-ups
  */
 export const FUEL_LOOKUP = {
-  "Maurten Gel 100":           25,
-  "Koda Energy Gel":           30,
-  "SIS Beta Fuel Gel":         40,
-  "Energy Chews (Per Packet)": 32,
-  "Tailwind 500ml Flask":      50,
+  "Maurten Gel 100":           { carbs: 25, type: "solid" },
+  "Koda Energy Gel":           { carbs: 30, type: "solid" },
+  "SIS Beta Fuel Gel":         { carbs: 40, type: "solid" },
+  "Energy Chews (Per Packet)": { carbs: 32, type: "solid" },
+  "Tailwind 500ml Flask":      { carbs: 50, type: "drink_mix" },
 };
 
 /**
