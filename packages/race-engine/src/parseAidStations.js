@@ -378,24 +378,42 @@ function buildStock(station) {
 
 /**
  * Convert an array of stations into the leg shape used by generateRacePlan().
- * Each station becomes one leg — section distance and gain from the section stats.
+ *
+ * Section distance priority:
+ *   1. Use sectionKm from "Section Stats:" if the race guide includes it.
+ *   2. If missing (race guide only gives cumulative km per checkpoint), derive
+ *      section km as the difference between consecutive cumulative distances.
+ *      This is the standard format for most Australian trail race guides —
+ *      checkpoint listings show where you ARE in the race (cumulative), not
+ *      how far you ran since the last checkpoint (section).
+ *   3. Final sanity-check: if a derived section distance is implausible
+ *      (negative or > total race distance), fall back to cumKm as a last resort.
  */
 function stationsToLegs(stations) {
-  return stations.map(station => ({
-    name:   station.name,
-    km:     Math.round(station.sectionKm * 10) / 10 || station.cumKm,
-    gainM:  station.sectionGainM,
-    stock:  buildStock(station),
-    // Extra fields carried through for the UI — not used by the engine calculation
-    // but available for display (e.g. cutoff badge on leg card)
-    cutoff:   station.cutoffTime   ? `${station.cutoffTime} (${station.cutoffDuration})` : null,
-    services: {
-      supportCrew: station.supportCrew,
-      pacers:      station.pacers,
-      dropBags:    station.dropBags,
-      toilet:      station.toilet,
-    },
-  }));
+  return stations.map((station, i) => {
+    let km = station.sectionKm;
+
+    // If no Section Stats were parsed, derive from cumulative difference
+    if (!km || isNaN(km) || km <= 0) {
+      const prevCumKm = i === 0 ? 0 : (stations[i - 1].cumKm || 0);
+      const derived   = Math.round((station.cumKm - prevCumKm) * 10) / 10;
+      km = derived > 0 ? derived : station.cumKm; // last-resort fallback
+    }
+
+    return {
+      name:   station.name,
+      km:     Math.round(km * 10) / 10,
+      gainM:  station.sectionGainM,
+      stock:  buildStock(station),
+      cutoff:   station.cutoffTime   ? `${station.cutoffTime} (${station.cutoffDuration})` : null,
+      services: {
+        supportCrew: station.supportCrew,
+        pacers:      station.pacers,
+        dropBags:    station.dropBags,
+        toilet:      station.toilet,
+      },
+    };
+  });
 }
 
 /**
@@ -418,14 +436,19 @@ export function parseAidStations(text) {
 
   const stations = blocks.map(parseBlock);
 
-  // Validate — flag stations with missing section data
-  stations.forEach(s => {
+  // Validate — check cumulative distances are monotonically increasing
+  let prevCum = 0;
+  stations.forEach((s, i) => {
     if (!s.name) {
-      errors.push(`Could not parse name for a station block.`);
+      errors.push(`Could not parse name for station ${i + 1}.`);
     }
     if (!s.sectionKm || isNaN(s.sectionKm)) {
-      errors.push(`"${s.name || "Unknown"}" is missing section distance — km set to cumulative distance.`);
+      // Not an error — we derive from cumulative. Only warn if cumulative also looks wrong.
+      if (s.cumKm <= prevCum && i > 0) {
+        errors.push(`"${s.name || `Station ${i + 1}`}" cumulative distance (${s.cumKm}km) is not greater than previous (${prevCum}km) — section distance may be wrong.`);
+      }
     }
+    if (s.cumKm > 0) prevCum = s.cumKm;
   });
 
   const legs = stationsToLegs(stations);

@@ -1900,7 +1900,7 @@ function findSessionByWtype(week, wtype) {
   return null;
 }
 
-function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, onCompletion }) {
+function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, onCompletion, onNav }) {
   const [filter, setFilter] = useState("all");
   if (!plan.length) return (
     <div style={{padding:"48px 16px",textAlign:"center"}}>
@@ -1938,12 +1938,17 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
 
   return (
     <div>
-      {/* Event countdown banner */}
+      {/* Event countdown banner — tap to go to Event screen */}
       {countdown && (
-        <div style={{margin:"12px var(--pad-x) 0",padding:"12px 14px",
-          borderRadius:"var(--r)",border:"2px solid var(--accent)",
-          background:"var(--accent-light)",color:"var(--accent)",
-          display:"flex",alignItems:"center",gap:12}}>
+        <div
+          onClick={() => onNav && onNav("event")}
+          style={{margin:"12px var(--pad-x) 0",padding:"12px 14px",
+            borderRadius:"var(--r)",border:"2px solid var(--accent)",
+            background:"var(--accent-light)",color:"var(--accent)",
+            display:"flex",alignItems:"center",gap:12,
+            cursor: onNav ? "pointer" : "default",
+            userSelect:"none",
+            WebkitTapHighlightColor:"transparent"}}>
           {countdown.isRaceDay ? (
             <>
               <div style={{fontSize:28}}>🏁</div>
@@ -1951,6 +1956,7 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Race Day</div>
                 <div style={{fontSize:16,fontWeight:800}}>{countdown.eventName} — today is the day</div>
               </div>
+              {onNav && <div style={{fontSize:16,opacity:.5}}>›</div>}
             </>
           ) : countdown.isPast ? (
             <>
@@ -1959,6 +1965,7 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Done</div>
                 <div style={{fontSize:14,fontWeight:700}}>{countdown.eventName} was {countdown.daysAgo} day{countdown.daysAgo===1?"":"s"} ago</div>
               </div>
+              {onNav && <div style={{fontSize:16,opacity:.5}}>›</div>}
             </>
           ) : (
             <>
@@ -1975,6 +1982,7 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                   {countdown.extraDays > 0 || countdown.weeksOut === 0 ? `${countdown.extraDays || countdown.daysOut} day${(countdown.extraDays||countdown.daysOut)===1?"":"s"}` : ""}
                 </div>
               </div>
+              {onNav && <div style={{fontSize:16,opacity:.5}}>›</div>}
             </>
           )}
         </div>
@@ -2321,12 +2329,79 @@ function DayPlanPicker({ value, onChange }) {
 // ─────────────────────────────────────────────────────────────
 const APP_ID = "bronies-training";
 
+// ── Local Profile Switcher ────────────────────────────────────
+// A lightweight dev/family tool: switch between isolated localStorage
+// namespaces without logging out. Slugs are stored outside the normal
+// key namespace so they survive profile switches.
+//
+// Default slug "" → existing data, no migration, no change.
+// Named slug "jono" → all keys live under "bronies-training:jono:bep6_*"
+//
+// When signed in to Supabase, the user_id naturally isolates data in the
+// cloud, so the slug only affects the localStorage fallback path.
+//
+// API:
+//   getProfileSlug()              → "" | "jono" | ...
+//   setProfileSlug(slug)          → switches namespace, reloads page
+//   listProfileSlugs()            → ["", "jono", ...]
+//   deleteProfileSlug(slug)       → removes all keys for that slug
+const SLUG_INDEX_KEY = `${APP_ID}:__profiles__`;
+
+function getProfileSlug() {
+  try { return localStorage.getItem(`${APP_ID}:__active_slug__`) || ""; } catch { return ""; }
+}
+
+function slugPrefix(slug) {
+  return slug ? `${APP_ID}:${slug}:` : `${APP_ID}:`;
+}
+
+function listProfileSlugs() {
+  try {
+    const raw = localStorage.getItem(SLUG_INDEX_KEY);
+    const saved = raw ? JSON.parse(raw) : [];
+    // Always include "" (default) plus any named ones
+    return ["", ...saved.filter(s => s && s !== "")];
+  } catch { return [""]; }
+}
+
+function saveProfileSlugsIndex(slugs) {
+  try { localStorage.setItem(SLUG_INDEX_KEY, JSON.stringify(slugs.filter(s => s !== ""))); } catch {}
+}
+
+function setProfileSlug(slug) {
+  try {
+    localStorage.setItem(`${APP_ID}:__active_slug__`, slug || "");
+    // Make sure this slug is in the index
+    const current = listProfileSlugs().filter(s => s !== "" && s !== slug);
+    if (slug) saveProfileSlugsIndex([...current, slug]);
+    // Reload so all state is re-read from the new namespace
+    window.location.reload();
+  } catch {}
+}
+
+function deleteProfileSlug(slug) {
+  if (!slug) return; // never delete the default profile
+  try {
+    const prefix = slugPrefix(slug);
+    const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+    keys.forEach(k => localStorage.removeItem(k));
+    // Remove from index
+    const remaining = listProfileSlugs().filter(s => s !== "" && s !== slug);
+    saveProfileSlugsIndex(remaining);
+    // If deleting the active slug, fall back to default
+    if (getProfileSlug() === slug) setProfileSlug("");
+  } catch {}
+}
+
 async function getUid() {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     return session?.user?.id || null;
   } catch { return null; }
 }
+
+// Active slug — read once at module load, doesn't change during a session
+const _activeSlug = getProfileSlug();
 
 const store = {
   async get(key) {
@@ -2347,7 +2422,7 @@ const store = {
       } catch {}
     }
     try {
-      const val = localStorage.getItem(`${APP_ID}:${key}`);
+      const val = localStorage.getItem(`${slugPrefix(_activeSlug)}${key}`);
       return val ? { value: val } : null;
     } catch { return null; }
   },
@@ -2363,7 +2438,7 @@ const store = {
         }, { onConflict: "user_id,app_id,key" });
       } catch {}
     }
-    try { localStorage.setItem(`${APP_ID}:${key}`, value); } catch {}
+    try { localStorage.setItem(`${slugPrefix(_activeSlug)}${key}`, value); } catch {}
     return { value };
   },
 
@@ -2376,7 +2451,7 @@ const store = {
           .eq("user_id", uid).eq("app_id", APP_ID).eq("key", key);
       } catch {}
     }
-    try { localStorage.removeItem(`${APP_ID}:${key}`); } catch {}
+    try { localStorage.removeItem(`${slugPrefix(_activeSlug)}${key}`); } catch {}
     return { deleted: true };
   },
 
@@ -2392,10 +2467,10 @@ const store = {
       } catch {}
     }
     try {
-      const pre = `${APP_ID}:${prefix}`;
+      const pre = `${slugPrefix(_activeSlug)}${prefix}`;
       const keys = Object.keys(localStorage)
         .filter(k => k.startsWith(pre))
-        .map(k => k.replace(`${APP_ID}:`, ""));
+        .map(k => k.replace(slugPrefix(_activeSlug), ""));
       return { keys };
     } catch { return { keys: [] }; }
   },
@@ -2408,7 +2483,7 @@ const store = {
     const keys = ["bep6_profile","bep6_event","bep6_fb","bep6_overrides","bep6_slots","bep6_completions","bep6_skin","bep6_racePlan","bep6_nutritionLib"];
     for (const key of keys) {
       try {
-        const raw = localStorage.getItem(`${APP_ID}:${key}`);
+        const raw = localStorage.getItem(`${slugPrefix(_activeSlug)}${key}`);
         if (!raw) continue;
         // Only push if cloud has no value for this key — never overwrite existing cloud data.
         const { data: existing } = await supabase
@@ -5365,9 +5440,6 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
           borderBottom:"2px solid var(--nav)"}}>
           {[
             {id:"plan",      label:"Plan"},
-            {id:"stats",     label:"Stats"},
-            {id:"log",       label:"Log"},
-            {id:"event",     label:"Event"},
             {id:"fuel",      label:"Fuel"},
             {id:"workouts",  label:"Workouts"},
             {id:"race",      label:"Race Day"},
@@ -6280,6 +6352,129 @@ function AuthScreen({ onAuth, onSkip, skin }) {
 // ─────────────────────────────────────────────────────────────
 //  ROOT APP
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  PROFILE SWITCHER
+//  Lets one device hold multiple isolated training profiles
+//  (e.g. your own ultra plan + a family member's 10km plan)
+//  without any login. Each profile gets its own localStorage
+//  namespace. Completely local — no Supabase interaction.
+// ─────────────────────────────────────────────────────────────
+function ProfileSwitcher() {
+  const [open,     setOpen]     = useState(false);
+  const [newName,  setNewName]  = useState("");
+  const [confirm,  setConfirm]  = useState(null); // slug to confirm-delete
+  const slugs    = listProfileSlugs();
+  const active   = getProfileSlug();
+
+  function handleCreate() {
+    const slug = newName.trim().toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+    if (!slug || slugs.includes(slug)) return;
+    setNewName("");
+    setProfileSlug(slug); // saves to index + reloads
+  }
+
+  return (
+    <div style={{ marginTop:4 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="btn btn-g btn-sm"
+        style={{ width:"100%", fontSize:11, color:"var(--ink4)", letterSpacing:.3 }}>
+        👤 Local profiles {open ? "▲" : "▼"}
+      </button>
+
+      {open && (
+        <div style={{ marginTop:8, padding:14, background:"var(--bg)",
+          border:"1px solid var(--rule)", borderRadius:"var(--r)" }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)",
+            textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>
+            Local profiles
+          </div>
+          <div style={{ fontSize:11, color:"var(--ink4)", marginBottom:12, lineHeight:1.5 }}>
+            Each profile is a fully separate plan — your data, your pace, your event.
+            Switching reloads the app. Cloud sync (Supabase) is per-login and unaffected.
+          </div>
+
+          {/* Profile list */}
+          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
+            {slugs.map(slug => {
+              const isActive = slug === active;
+              const label    = slug === "" ? "My profile (default)" : slug;
+              return (
+                <div key={slug} style={{ display:"flex", alignItems:"center", gap:8,
+                  padding:"9px 12px", borderRadius:"var(--r)",
+                  border:`2px solid ${isActive ? "var(--ink)" : "var(--rule)"}`,
+                  background: isActive ? "var(--ink)" : "var(--white)" }}>
+                  <div style={{ flex:1, fontSize:12, fontWeight:isActive?700:500,
+                    color: isActive ? "#fff" : "var(--ink)" }}>
+                    {label}
+                    {isActive && <span style={{ marginLeft:8, fontSize:10, opacity:.7 }}>● active</span>}
+                  </div>
+                  {!isActive && (
+                    <button
+                      onClick={() => setProfileSlug(slug)}
+                      className="btn btn-o btn-sm"
+                      style={{ fontSize:10, padding:"3px 8px" }}>
+                      Switch
+                    </button>
+                  )}
+                  {slug !== "" && (
+                    confirm === slug ? (
+                      <div style={{ display:"flex", gap:4 }}>
+                        <button onClick={() => { setConfirm(null); deleteProfileSlug(slug); }}
+                          style={{ fontSize:10, padding:"3px 8px", background:"var(--warn)",
+                            color:"#fff", border:"none", borderRadius:"var(--r)", cursor:"pointer" }}>
+                          Delete
+                        </button>
+                        <button onClick={() => setConfirm(null)}
+                          style={{ fontSize:10, padding:"3px 8px", background:"var(--bg)",
+                            border:"1px solid var(--rule)", borderRadius:"var(--r)", cursor:"pointer",
+                            color:"var(--ink3)" }}>
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirm(slug)}
+                        style={{ fontSize:11, background:"none", border:"none",
+                          color:"var(--warn)", cursor:"pointer", padding:"0 4px",
+                          opacity: isActive ? .4 : 1 }}
+                        disabled={isActive}>
+                        ✕
+                      </button>
+                    )
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Create new profile */}
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)",
+            textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
+            New profile
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <input className="inp" style={{ flex:1, fontSize:12 }}
+              placeholder="e.g. jono or sarah"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleCreate()} />
+            <button className="btn btn-p btn-sm"
+              onClick={handleCreate}
+              disabled={!newName.trim()}
+              style={{ flexShrink:0, whiteSpace:"nowrap" }}>
+              Create &amp; switch
+            </button>
+          </div>
+          <div style={{ fontSize:10, color:"var(--ink4)", marginTop:6, lineHeight:1.5 }}>
+            Profile names are lowercased and hyphenated automatically.
+            Deleting a profile permanently removes all its local data.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [authReady,      setAuthReady]      = useState(false);  // true once we've checked session
   const [authed,         setAuthed]         = useState(false);  // true if logged in
@@ -6719,7 +6914,6 @@ export default function App() {
         {skin === "socceroos" && (() => {
           const worldCupEnd = new Date("2026-07-19T23:59:59");
           if (new Date() > worldCupEnd) return null;
-          const daysLeft = Math.ceil((worldCupEnd - new Date()) / (1000 * 60 * 60 * 24));
           return (
             <div style={{ background:"#006633", color:"#FFD700", fontSize:11, fontWeight:700,
               letterSpacing:.8, textTransform:"uppercase", textAlign:"center",
@@ -6727,9 +6921,6 @@ export default function App() {
               justifyContent:"center", gap:8 }}>
               <span>⚽</span>
               <span>FIFA World Cup 2026 — Go Socceroos!</span>
-              <span style={{ fontWeight:400, fontSize:10, opacity:.8 }}>
-                {daysLeft > 0 ? `${daysLeft}d to go` : "Today's the day!"}
-              </span>
               <span>⚽</span>
             </div>
           );
@@ -6827,7 +7018,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                <PlanOverview plan={planWithOverrides} event={event} onSelectWeek={setSelWeek} feedbackMap={feedbackMap} completionMap={completionMap} onCompletion={handleCompletion}/>
+                <PlanOverview plan={planWithOverrides} event={event} onSelectWeek={setSelWeek} feedbackMap={feedbackMap} completionMap={completionMap} onCompletion={handleCompletion} onNav={s => { setSelWeek(null); setScreen(s); }}/>
               </>
             )}
           </div>
@@ -6986,6 +7177,27 @@ export default function App() {
             <div style={{fontFamily:"var(--display)",fontSize:24,letterSpacing:1,marginBottom:14}}>
               Your Profile
             </div>
+
+            {/* Quick-access tiles — Stats, Log, Event */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
+              {[
+                { id:"stats",  icon:"📈", label:"Stats"      },
+                { id:"log",    icon:"📋", label:"Training Log"},
+                { id:"event",  icon:"🏁", label:"Event"       },
+              ].map(t => (
+                <button key={t.id}
+                  onClick={() => setScreen(t.id)}
+                  className="card"
+                  style={{padding:"12px 8px",textAlign:"center",cursor:"pointer",
+                    border:"2px solid var(--rule)",background:"var(--white)",
+                    borderRadius:"var(--r)",display:"flex",flexDirection:"column",
+                    alignItems:"center",gap:4}}>
+                  <div style={{fontSize:22}}>{t.icon}</div>
+                  <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",
+                    letterSpacing:.5,textTransform:"uppercase"}}>{t.label}</div>
+                </button>
+              ))}
+            </div>
             <div className="card card-l" style={{padding:16,marginBottom:16,
               background:"#E8F5E9",borderColor:"#4CAF50"}}>
               <div style={{fontFamily:"var(--display)",fontSize:22,letterSpacing:1}}>{profile.name || "Anonymous Bronie"}</div>
@@ -7094,9 +7306,12 @@ export default function App() {
             <button onClick={() => setScreen("onboarding")} className="btn btn-o" style={{width:"100%",marginBottom:10}}>
               ✏ Edit event / goal
             </button>
-            <button onClick={resetAll} className="btn btn-g btn-sm" style={{width:"100%"}}>
+            <button onClick={resetAll} className="btn btn-g btn-sm" style={{width:"100%",marginBottom:16}}>
               🗑 Reset everything
             </button>
+
+            {/* ── Local Profiles (dev / family switcher) ───────────── */}
+            <ProfileSwitcher />
           </div>
         )}
 
