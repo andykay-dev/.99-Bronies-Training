@@ -4125,12 +4125,13 @@ function WorkoutCreatorScreen({ onBack }) {
 function RunPlannerScreen({ nutritionLib = [], onBack }) {
 
   // ── Inputs ────────────────────────────────────────────────
-  const [distKm,         setDistKm]         = useState("");
-  const [paceMin,        setPaceMin]         = useState("");
-  const [paceSec,        setPaceSec]         = useState("");
-  const [conditions,     setConditions]      = useState("mild");
-  const [waterAvailable, setWaterAvailable]  = useState(false);
-  const [selectedFuel,   setSelectedFuel]    = useState([]); // names of items selected for this run
+  const [distKm,           setDistKm]           = useState("");
+  const [paceMin,          setPaceMin]           = useState("");
+  const [paceSec,          setPaceSec]           = useState("");
+  const [conditions,       setConditions]        = useState("mild");
+  const [waterAvailable,   setWaterAvailable]    = useState(false);
+  const [selectedFuel,     setSelectedFuel]      = useState([]);
+  const [fuelIntervalMins, setFuelIntervalMins]  = useState(null); // null = auto
 
   // Merge library + built-ins for fuel selection
   const builtins   = Object.entries(FUEL_LOOKUP).map(([name, meta]) => ({ name, carbs: meta.carbs, type: meta.type || "solid", source:"builtin" }));
@@ -4155,7 +4156,7 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
   const paceSecKm = pMin * 60 + pSec;
 
   const plan = (dist > 0 && paceSecKm > 60)
-    ? planRun({ distKm: dist, paceSecKm, conditions, fuelInventory, waterAvailable })
+    ? planRun({ distKm: dist, paceSecKm, conditions, fuelInventory, waterAvailable, fuelIntervalMins })
     : null;
 
   // ── Pace helpers ──────────────────────────────────────────
@@ -4225,6 +4226,58 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
           value={distKm}
           onChange={e => setDistKm(e.target.value)} />
         <span style={{ fontSize:13, color:"var(--ink3)" }}>km</span>
+      </div>
+
+      {/* ── Fuel interval ────────────────────────────────────── */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:6 }}>Fuel interval</div>
+
+      <div style={{ fontSize:11, color:"var(--ink3)", marginBottom:8, lineHeight:1.5 }}>
+        {plan
+          ? <>Recommended every{" "}
+              <span style={{ fontWeight:700, color:"var(--accent)" }}>
+                {plan.recommendedIntervalMins}min
+              </span>
+              {fuelIntervalMins
+                ? " — overridden below"
+                : " — tap a number to override"}</>
+          : "Enter distance and pace to see a recommendation, or pick manually."}
+      </div>
+
+      {/* Auto button + minute grid 20–59 */}
+      <div style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+          <button
+            onClick={() => setFuelIntervalMins(null)}
+            style={{ padding:"6px 14px", borderRadius:"var(--r)", fontSize:11, fontWeight:700,
+              cursor:"pointer", transition:"all .15s",
+              border:`2px solid ${fuelIntervalMins === null ? "var(--accent)" : "var(--rule)"}`,
+              background: fuelIntervalMins === null ? "var(--accent)" : "var(--white)",
+              color: fuelIntervalMins === null ? "#fff" : "var(--ink3)" }}>
+            Auto{plan ? ` (${plan.recommendedIntervalMins}min)` : ""}
+          </button>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(8,1fr)", gap:4 }}>
+          {Array.from({ length:40 }, (_, i) => i + 20).map(min => {
+            const isSelected    = fuelIntervalMins === min;
+            const isRecommended = plan && min === plan.recommendedIntervalMins && fuelIntervalMins === null;
+            return (
+              <button key={min}
+                onClick={() => setFuelIntervalMins(fuelIntervalMins === min ? null : min)}
+                style={{ padding:"6px 2px", borderRadius:"var(--r)", fontSize:11, fontWeight:700,
+                  textAlign:"center", cursor:"pointer", transition:"all .15s",
+                  border:`2px solid ${isSelected ? "var(--ink)" : isRecommended ? "var(--accent)" : "var(--rule)"}`,
+                  background: isSelected ? "var(--ink)" : isRecommended ? "var(--accent-light)" : "var(--white)",
+                  color: isSelected ? "#fff" : isRecommended ? "var(--accent)" : "var(--ink3)" }}>
+                {min}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:10, color:"var(--ink4)", marginTop:5, lineHeight:1.4 }}>
+          Minutes between each fuel item · blue = recommended · tap again to deselect
+        </div>
       </div>
 
       {/* ── Pace ─────────────────────────────────────────── */}
@@ -4391,8 +4444,14 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
           {/* Fuel timings */}
           {plan.timings.length > 0 && (
             <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
-                textTransform:"uppercase", marginBottom:8 }}>Take-fuel reminders</div>
+              <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:8 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+                  textTransform:"uppercase" }}>Take-fuel reminders</div>
+                <div style={{ fontSize:10, color:"var(--ink4)" }}>
+                  every {plan.activeIntervalMins}min
+                  {fuelIntervalMins ? " (manual)" : " (auto)"}
+                </div>
+              </div>
               {plan.timings.map((t, i) => (
                 <div key={i} style={{ display:"flex", alignItems:"center", gap:12,
                   padding:"9px 12px", background:"var(--white)",

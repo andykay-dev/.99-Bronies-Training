@@ -51,15 +51,14 @@ function carbRateForDuration(durationMins) {
 
 /**
  * Generate take-fuel timing reminders.
- * First item at 20min, then every intervalMins until end.
- * Returns array of { atMin, label } objects.
+ * First item at 20min, then every intervalMins.
+ * When intervalMins is provided explicitly it's used as-is.
  */
-function buildTimings(durationMins, totalItems, fuelInventory) {
-  if (totalItems === 0) return [];
+function buildTimings(durationMins, totalItems, fuelInventory, intervalMins) {
+  if (totalItems === 0 || durationMins < 45) return [];
 
-  const timings = [];
-  const intervalMins = Math.max(15, Math.min(25, Math.round((durationMins - 20) / totalItems)));
   const items = fuelInventory && fuelInventory.length > 0 ? fuelInventory : null;
+  const timings = [];
 
   let itemIdx = 0;
   let atMin   = 20;
@@ -67,9 +66,9 @@ function buildTimings(durationMins, totalItems, fuelInventory) {
   while (atMin < durationMins - 5 && timings.length < totalItems) {
     const item = items ? items[itemIdx % items.length] : null;
     timings.push({
-      atMin,
-      label: item ? item.name : "Fuel item",
-      carbs: item ? item.carbs : 25,
+      atMin:  Math.round(atMin),
+      label:  item ? item.name : "Fuel item",
+      carbs:  item ? item.carbs : 25,
     });
     atMin   += intervalMins;
     itemIdx += 1;
@@ -121,28 +120,43 @@ export function planRun(input) {
   const {
     distKm,
     paceSecKm,
-    conditions   = "mild",
-    fuelInventory = [],
-    waterAvailable = false,
+    conditions      = "mild",
+    fuelInventory   = [],
+    waterAvailable  = false,
+    fuelIntervalMins = null,   // null = auto-recommend; number = user override (20–59)
   } = input;
 
   // ── Duration ─────────────────────────────────────────────
-  // paceSecKm is seconds per km, so:
-  // durationMins = distKm × paceSecKm (sec) ÷ 60 (sec/min)
   const durationMins = (distKm * paceSecKm) / 60;
 
   // ── Carbs ─────────────────────────────────────────────────
   const carbRate  = carbRateForDuration(durationMins);
-  const carbsG    = Math.round((durationMins / 60) * carbRate);
+  const totalCarbsG = Math.round((durationMins / 60) * carbRate);
   const perItem   = avgCarbsPerItem(fuelInventory);
-  const vestItems = carbsG > 0 ? Math.ceil(carbsG / perItem) : 0;
+
+  // ── Recommended interval ──────────────────────────────────
+  // Auto: spread items evenly between the 20min mark and the end,
+  // clamped to a sensible 20–30min window.
+  // Override: use the user's chosen interval and derive item count from it.
+  const recommendedIntervalMins = totalCarbsG > 0 && perItem > 0
+    ? Math.round(Math.max(20, Math.min(30, (durationMins - 20) / Math.ceil(totalCarbsG / perItem))))
+    : 25;
+
+  const activeIntervalMins = fuelIntervalMins ?? recommendedIntervalMins;
+
+  // Re-derive item count from the active interval:
+  // how many interval-sized windows fit between 20min and end of run?
+  let vestItems = 0;
+  if (totalCarbsG > 0 && activeIntervalMins > 0) {
+    const availableWindow = Math.max(0, durationMins - 20);
+    vestItems = Math.max(1, Math.round(availableWindow / activeIntervalMins));
+  }
 
   // ── Fluid ─────────────────────────────────────────────────
   const heatMultiplier = { cool:0.8, mild:1.0, warm:1.25, hot:1.5 }[conditions] ?? 1.0;
   const fluidMl = Math.round((durationMins / 60) * FLUID_TARGET_PER_HOUR * heatMultiplier);
 
-  // If water is available on course, carry less — one flask minimum
-  const rawFlasks  = Math.ceil(fluidMl / FLASK_ML);
+  const rawFlasks = Math.ceil(fluidMl / FLASK_ML);
   const flasks = waterAvailable
     ? Math.max(1, Math.ceil(rawFlasks / 2))
     : Math.max(1, rawFlasks);
@@ -160,9 +174,9 @@ export function planRun(input) {
   }
 
   // ── Timings ───────────────────────────────────────────────
-  const timings = buildTimings(durationMins, vestItems, fuelInventory);
+  const timings = buildTimings(durationMins, vestItems, fuelInventory, activeIntervalMins);
 
-  // ── Contextual tips ───────────────────────────────────────
+  // ── Tips ──────────────────────────────────────────────────
   const tips = [];
 
   if (conditions === "hot" || conditions === "warm") {
@@ -184,13 +198,17 @@ export function planRun(input) {
   if (fuelInventory.length === 0) {
     tips.push("No fuel inventory set — estimates use 25g/item average. Add your products to the library for exact counts.");
   }
+  if (fuelIntervalMins && fuelIntervalMins > 30) {
+    const carbsPerItem = perItem || 25;
+    tips.push(`${activeIntervalMins}min interval — each item needs to cover ~${Math.round(carbsPerItem)}g. Make sure your chosen fuel has enough carbs per serve.`);
+  }
 
   return {
     distKm,
     paceSecKm,
-    durationMins: Math.round(durationMins * 10) / 10,
-    durationFmt:  fmtMins(durationMins),
-    carbsG,
+    durationMins:          Math.round(durationMins * 10) / 10,
+    durationFmt:           fmtMins(durationMins),
+    carbsG:                totalCarbsG,
     carbRate,
     fluidMl,
     vestItems,
@@ -198,5 +216,7 @@ export function planRun(input) {
     carbsNote,
     timings,
     tips,
+    recommendedIntervalMins,
+    activeIntervalMins,
   };
 }
