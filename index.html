@@ -6,19 +6,27 @@
     <meta name="description" content="Bronies .99 Training — embrace the .99 chaos" />
     <title>Bronies .99 Training</title>
 
-    <!-- Browser favicon (pixel pony, retained from original) + main vector icon -->
+    <!-- Favicon for browser tabs (SVG works fine here) -->
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="alternate icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/apple-touch-icon.png" />
 
-    <!-- iOS — add to home screen support -->
-    <link rel="apple-touch-icon" href="/icon.svg" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icon.svg" />
+    <!--
+      iOS "Add to Home Screen" — MUST be PNG, not SVG.
+      Safari only reads apple-touch-icon as a raster image.
+      180×180 is the canonical size for all modern iPhones.
+      No "precomposed" suffix = iOS adds its own gloss/rounding.
+    -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <!-- iOS PWA display settings -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Bronies" />
 
-    <!-- Android / PWA -->
-    <meta name="theme-color" content="#2E5FA3" />
+    <!-- Splash screen background colour while the app loads on iOS -->
+    <meta name="theme-color" content="#1A3060" />
+
+    <!-- Android / Chrome PWA manifest -->
     <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>
