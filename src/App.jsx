@@ -7667,32 +7667,24 @@ export default function App() {
       }
       setAuthReady(true);
     });
-    // Listen for login/logout events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    // Safety net: if getSession() never resolves (network down etc.), unblock after 3s
+    const fallback = setTimeout(() => setAuthReady(true), 3000);
+    // Listen for login/logout events — keep this synchronous.
+    // Sign-in from the welcome screen goes through handleAuthSuccess which
+    // calls loadPersistedState() itself. This handler just keeps authed state in sync.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setAuthed(true);
         setUserEmail(session.user.email);
-        // On a real sign-in event (not the initial session restore which is
-        // handled by the authReady effect), reload from Supabase so the user
-        // goes straight to their saved plan instead of staying on the welcome screen.
-        if (_event === "SIGNED_IN") {
-          // Small delay to ensure the SDK has fully persisted the session token
-          // before store.get() calls getUid() — same guard as handleAuthSuccess.
-          await new Promise(r => setTimeout(r, 300));
-          await loadPersistedState();
-          const cloudCheck = await store.get("bep6_profile");
-          if (cloudCheck) {
-            let name = "";
-            try { name = JSON.parse(cloudCheck.value)?.name || ""; } catch {}
-            showToast(name ? `Welcome back, ${name}! ☁` : "Your plan is loaded ☁");
-          }
-        }
+        // If authReady hasn't been set yet (OAuth redirect lands here before
+        // getSession() resolves), unblock the loading screen now.
+        setAuthReady(true);
       } else {
         setAuthed(false);
         setUserEmail(null);
       }
     });
-    return () => subscription.unsubscribe();
+    return () => { subscription.unsubscribe(); clearTimeout(fallback); };
   }, []);
 
   async function handleLogout() {
