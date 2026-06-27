@@ -10,6 +10,7 @@ import {
   longRunCap, estimateLongRunTime, elevationGuide, bucketElevation,
   DAYS, PHASES, RACE_DISTANCES, TRAINING_GOALS,
   SLOT_TYPES, computeFeedbackAdj,
+  generateMaintenancePlan,
 } from "@bronies/engine-core";
 
 import {
@@ -32,7 +33,7 @@ import {
   planRun,
 } from "@bronies/race-engine";
 
-import { parseWorkoutText, fmtPaceStr } from "./parseWorkout.js";
+import { parseWorkoutText, fmtPaceStr, paceZone } from "./parseWorkout.js";
 import { buildWorkoutJson }             from "./buildWorkoutJson.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -572,6 +573,9 @@ function buildPlan(profile, event, feedbackMap) {
   if (profile.trainingGoal === "healthier") {
     return generateBeginnerPlan(profile, feedbackMap || {});
   }
+  if (profile.trainingGoal === "maintenance") {
+    return generateMaintenancePlan(profile, feedbackMap || {});
+  }
   const hasEvent = !!(event && event.date);
   return generatePlan(profile, hasEvent ? event : null, feedbackMap || {});
 }
@@ -591,109 +595,6 @@ const BRONIE_SUGGESTIONS = [
   { title:"Talk Absolute Rubbish",desc:"No work, no kids, no PBs. Pure nonsense only." },
   { title:"The Long Way Home",    desc:"Take the scenic route. We're not in a hurry." },
 ];
-
-// ─────────────────────────────────────────────────────────────
-//  DEMO SCENARIOS
-// ─────────────────────────────────────────────────────────────
-const DEMO_SCENARIOS = {
-  newcastle_mara: {
-    label: "Newcastle Marathon @ 6:00/km",
-    desc:  "Marathon goal, training off easy 10km",
-    profile: {
-      name:"Demo · Newcastle", nickname:"Newy",
-      trainingGoal:"goal_event",
-      refDistance:"10k", refTime:"54:00",
-      dayPlan: DEFAULT_DAY_PLAN,
-      trailAccess:"mostly road", hillAccess:"some hills", injuryHistory:"none",
-    },
-    event: {
-      name:"Newcastle Marathon", date:"2026-09-13",
-      distance:"42km", location:"Newcastle, NSW",
-      type:"road", elevation:"flat",
-      goalTime:"4:13:12", priority:"A",
-    },
-  },
-  melbourne_mara: {
-    label: "Melbourne Marathon — Goal 3:15:15",
-    desc:  "Sharp marathon attempt, road-focused",
-    profile: {
-      name:"Demo · Melbourne", nickname:"Speedy",
-      trainingGoal:"goal_event",
-      refDistance:"half", refTime:"1:32:00",
-      dayPlan: DEFAULT_DAY_PLAN,
-      trailAccess:"mostly road", hillAccess:"mostly flat", injuryHistory:"none",
-    },
-    event: {
-      name:"Melbourne Marathon", date:"2026-10-12",
-      distance:"42km", location:"Melbourne, VIC",
-      type:"road", elevation:"flat",
-      goalTime:"3:15:15", priority:"A",
-    },
-  },
-  raffertys: {
-    label: "Rafferty's 11km — Just Finish",
-    desc:  "Beginner trail event, build confidence",
-    profile: {
-      name:"Demo · Rafferty's", nickname:"First-Timer",
-      trainingGoal:"goal_event",
-      refDistance:"5k", refTime:"32:00",
-      dayPlan: DEFAULT_DAY_PLAN,
-      trailAccess:"mix of trail & road", hillAccess:"some hills", injuryHistory:"none",
-    },
-    event: {
-      name:"Rafferty's Coastal Run", date:"2026-08-23",
-      distance:"11km", location:"Lake Macquarie, NSW",
-      type:"trail", elevation:"medium",
-      goalTime:"", priority:"A",
-    },
-  },
-  rumble: {
-    label: "Rumble in the Jungle 50km — 7:59:59",
-    desc:  "Ultra-trail, big day in the bush",
-    profile: {
-      name:"Demo · Rumble", nickname:"Jungle",
-      trainingGoal:"goal_event",
-      refDistance:"half", refTime:"1:55:00",
-      dayPlan: DEFAULT_DAY_PLAN,
-      trailAccess:"mostly trail", hillAccess:"lots of hills", injuryHistory:"none",
-    },
-    event: {
-      name:"Rumble in the Jungle", date:"2026-08-01",
-      distance:"50km", location:"Bindarri NP, NSW",
-      type:"trail", elevation:"high",
-      goalTime:"7:59:59", priority:"A",
-    },
-  },
-  elephant_100: {
-    label: "Elephant Trail 100km — Just Finish",
-    desc:  "Big mountain ultra, finish-line goal",
-    profile: {
-      name:"Demo · Elephant", nickname:"Tusker",
-      trainingGoal:"goal_event",
-      refDistance:"mara", refTime:"4:30:00",
-      dayPlan: DEFAULT_DAY_PLAN,
-      trailAccess:"mostly trail", hillAccess:"lots of hills", injuryHistory:"none",
-    },
-    event: {
-      name:"Elephant Trail Race", date:"2026-10-25",
-      distance:"100km", location:"Port Macquarie, NSW",
-      type:"trail", elevation:"high",
-      goalTime:"", priority:"A",
-    },
-  },
-  hangout_demo: {
-    label: "Coffee With the Boys — The Hangout",
-    desc:  "No race, just the Wednesday/Friday rotation",
-    profile: {
-      name:"Demo · Hangout", nickname:"Coffee",
-      trainingGoal:"hangout",
-      refDistance:"10k", refTime:"60:00",
-      dayPlan: { mon:"rest", tue:"rest", wed:"bronies", thu:"rest", fri:"bronies", sat:"easy", sun:"rest" },
-      trailAccess:"mix of trail & road", hillAccess:"some hills", injuryHistory:"none",
-    },
-    event: null,
-  },
-};
 
 // ─────────────────────────────────────────────────────────────
 //  HELPERS
@@ -1900,7 +1801,7 @@ function findSessionByWtype(week, wtype) {
   return null;
 }
 
-function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, onCompletion, onNav }) {
+function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, completionMap, onCompletion, onNav, onFeedback, onRaceFinished }) {
   const [filter, setFilter] = useState("all");
   if (!plan.length) return (
     <div style={{padding:"48px 16px",textAlign:"center"}}>
@@ -1936,8 +1837,56 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
     }
   }
 
+  // Tomorrow session — find next day's session in the current week
+  const tomorrowSession = (() => {
+    const today = new Date(TODAY);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    for (const week of plan) {
+      if (!week.sessions) continue;
+      const sess = week.sessions.find(s => s.date === tomorrowStr);
+      if (sess && sess.type !== "rest") return { ...sess, dayLabel: DAYS.find(d=>d.id===sess.day)?.label || "" };
+    }
+    return null;
+  })();
+
+  const isMaintenance = profile?.trainingGoal === "maintenance";
+
   return (
     <div>
+      {/* Maintenance Mode banner */}
+      {isMaintenance && (
+        <div style={{margin:"12px var(--pad-x) 0",padding:"12px 14px",
+          borderRadius:"var(--r)",border:"2px solid #5b2d8e",
+          background:"#f3eeff",color:"#5b2d8e",
+          display:"flex",alignItems:"center",gap:12}}>
+          <div style={{fontSize:24}}>🔄</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Maintenance Mode</div>
+            <div style={{fontSize:14,fontWeight:700}}>
+              {profile.maintTargetKm || 30}km/week target · {profile.maintFreq || 3} days · rolling plan
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tomorrow banner */}
+      {tomorrowSession && (
+        <div style={{margin:"8px var(--pad-x) 0",padding:"10px 14px",
+          borderRadius:"var(--r)",background:"var(--ink)",color:"white",
+          display:"flex",alignItems:"center",gap:10,fontSize:13}}>
+          <div style={{fontSize:16}}>📅</div>
+          <div>
+            <span style={{fontWeight:700,opacity:.7,marginRight:6}}>Tomorrow</span>
+            <span style={{fontWeight:700}}>{tomorrowSession.dayLabel} · {tomorrowSession.label}</span>
+            {tomorrowSession.km > 0 && (
+              <span style={{opacity:.7,marginLeft:6}}>· {tomorrowSession.km}km</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Event countdown banner — tap to go to Event screen */}
       {countdown && (
         <div
@@ -1965,7 +1914,12 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Done</div>
                 <div style={{fontSize:14,fontWeight:700}}>{countdown.eventName} was {countdown.daysAgo} day{countdown.daysAgo===1?"":"s"} ago</div>
               </div>
-              {onNav && <div style={{fontSize:16,opacity:.5}}>›</div>}
+              {onRaceFinished && (
+                <button onClick={e => { e.stopPropagation(); onRaceFinished(); }}
+                  className="btn btn-p" style={{fontSize:11,padding:"6px 10px",flexShrink:0}}>
+                  What's next?
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -2024,14 +1978,27 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
       </div>
       <hr className="rule" style={{margin:0}}/>
 
-      {/* Filter pills */}
-      <div style={{padding:"10px var(--pad-x) 6px",display:"flex",gap:6,overflowX:"auto"}}>
+      {/* Filter pills + Jump to today */}
+      <div style={{padding:"10px var(--pad-x) 6px",display:"flex",gap:6,overflowX:"auto",alignItems:"center"}}>
         {Object.entries(FILTERS).map(([id, f]) => (
           <button key={id} onClick={() => setFilter(id)}
             className={`btn-pill${filter===id?" on":""}`} style={{flexShrink:0}}>
             {f.icon} {f.label}
           </button>
         ))}
+        {/* Jump to today — scrolls the current week into view */}
+        {plan.some(w => weekStatus(w.startDate) === "current") && (
+          <button
+            onClick={() => {
+              const el = document.getElementById("current-week-row");
+              if (el) el.scrollIntoView({ behavior:"smooth", block:"start" });
+            }}
+            style={{ marginLeft:"auto", flexShrink:0, fontSize:10, fontWeight:700,
+              color:"var(--accent)", background:"var(--accent-light)", border:"1px solid var(--accent)",
+              borderRadius:12, padding:"3px 10px", cursor:"pointer", whiteSpace:"nowrap" }}>
+            ↓ Today
+          </button>
+        )}
       </div>
 
       {/* Week rows */}
@@ -2043,6 +2010,23 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
           const wStatus = weekStatus(w.startDate);
           const isCurrent = wStatus === "current";
           const isPast    = wStatus === "past";
+
+          // Compute completion counts for the badge
+          const weekDays = DAYS.filter(d => {
+            const s = w.sessions?.[d.id];
+            if (!s || s.wtype === "rest") return false;
+            const isStrength = s.wtype === "rest" && (s.label || "").includes("Strength");
+            return !isStrength ? true : true;
+          });
+          const eligibleDays = weekDays.filter(d => {
+            const idx = DAYS.indexOf(d);
+            return dayIsPast(w.startDate, idx) || dayIsToday(w.startDate, idx);
+          });
+          const doneDays = eligibleDays.filter(d => {
+            const ck = `${w.weekNum}:${d.id}`;
+            return completionMap?.[ck] === "yeah_broo";
+          });
+          const showCompletionBadge = eligibleDays.length > 0;
 
           // Past filter: show ONLY past weeks (history view).
           if (filter === "past") {
@@ -2061,7 +2045,8 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
           const matched = filter === "all" || filter === "past" ? null : findSessionByWtype(w, cfg.slot);
 
           return (
-            <div key={i} onClick={() => onSelectWeek(i)}
+            <div key={i} id={isCurrent ? "current-week-row" : undefined}
+              onClick={() => onSelectWeek(i)}
               style={{borderBottom:"1px solid var(--rule)",cursor:"pointer",
                 background:isCurrent?"#EEF6FF":isRace?"var(--accent-light)":"white",
                 transition:"background .1s",
@@ -2087,6 +2072,15 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                       <span style={{fontSize:9,fontWeight:700,color:"white",background:"var(--accent)",
                         padding:"2px 7px",borderRadius:10,letterSpacing:.5,textTransform:"uppercase"}}>
                         THIS WEEK
+                      </span>
+                    )}
+                    {/* Completion badge: X/Y sessions done */}
+                    {showCompletionBadge && (
+                      <span style={{fontSize:9,fontWeight:700,
+                        color: doneDays.length === eligibleDays.length ? "#1a472a" : "var(--ink4)",
+                        background: doneDays.length === eligibleDays.length ? "#e8f5e9" : "var(--bg)",
+                        padding:"2px 7px",borderRadius:10,border:"1px solid currentColor",letterSpacing:.3}}>
+                        {doneDays.length}/{eligibleDays.length} ✓
                       </span>
                     )}
                     {isPast && (
@@ -2138,6 +2132,8 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                     const ck      = `${w.weekNum}:${d.id}`;
                     const cv      = completionMap?.[ck] || null;
                     const eligible = (past || today) && completionMap && onCompletion;
+                    // Missed: past and unanswered (no yeah_broo / nup_soft logged)
+                    const isMissed = past && !cv;
                     const slotColor = (w.sessions[d.id].wtype === "rest" && (w.sessions[d.id].label || "").includes("Strength"))
                       ? SLOT_TYPES.strength?.color || "#8B0000"
                       : SLOT_TYPES[
@@ -2164,6 +2160,12 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                           textDecoration: past && cv === "nup_soft" ? "line-through" : "none"}}>
                           {w.sessions[d.id].label}
                         </span>
+                        {/* Missed session hint */}
+                        {isMissed && filter === "all" && (
+                          <span style={{fontSize:9,color:"var(--ink4)",flexShrink:0,fontStyle:"italic"}}>
+                            tap to move
+                          </span>
+                        )}
                         {/* When a filter is active, surface distance + estimated time for the matched session */}
                         {filter !== "all" && (w.sessions[d.id].distance > 0 || w.sessions[d.id].estMins > 0) && (
                           <span style={{fontSize:11,fontWeight:700,color:slotColor,flexShrink:0,
@@ -2204,6 +2206,28 @@ function PlanOverview({ plan, event, onSelectWeek, feedbackMap, completionMap, o
                     );
                   })}
               </div>
+              {/* Weekly feel prompt — shown on past weeks without feedback */}
+              {isPast && !fb && onFeedback && (
+                <div style={{padding:"6px var(--pad-x) 10px 52px"}}
+                  onClick={e => e.stopPropagation()}>
+                  <div style={{fontSize:11,color:"var(--ink4)",marginBottom:5}}>How did last week feel?</div>
+                  <div style={{display:"flex",gap:6}}>
+                    {[
+                      { val:"too_easy",  label:"😴 Too easy" },
+                      { val:"ok",        label:"✓ Just right" },
+                      { val:"too_hard",  label:"😅 Too hard" },
+                    ].map(o => (
+                      <button key={o.val}
+                        onClick={() => onFeedback(w.weekNum, o.val)}
+                        style={{padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",
+                          borderRadius:12,border:"1.5px solid var(--rule)",
+                          background:"white",color:"var(--ink3)",transition:"all .12s"}}>
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -3012,6 +3036,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       refDistance:"10k", refTime:"",
       currentLongest:"", targetDistance:"", targetDistanceKm:"", timeline:"",
       healthyFreq: 3,
+      returningRunner: false,
       dayPlan: DEFAULT_DAY_PLAN,
       workoutMinutes: DEFAULT_WORKOUT_MINUTES,
       trailAccess:"mix of trail & road", hillAccess:"some hills", injuryHistory:"none",
@@ -3023,10 +3048,11 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
   const up      = (k, v) => setData(d => ({ ...d, [k]: v }));
   const upEvent = (k, v) => setData(d => ({ ...d, event:{ ...(d.event || DEFAULT_EVENT), [k]: v }}));
 
-  const isEvent     = data.trainingGoal === "goal_event";
-  const isHealth    = data.trainingGoal === "healthier";
-  const isHangout   = data.trainingGoal === "hangout";
-  const isFitness   = isHealth;
+  const isEvent       = data.trainingGoal === "goal_event";
+  const isHealth      = data.trainingGoal === "healthier";
+  const isHangout     = data.trainingGoal === "hangout";
+  const isMaintenance = data.trainingGoal === "maintenance";
+  const isFitness     = isHealth;
 
   function finish() {
     const profile = {
@@ -3039,21 +3065,27 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       targetDistanceKm: data.targetDistanceKm,
       timeline: data.timeline,
       healthyFreq: data.healthyFreq,
+      returningRunner: data.returningRunner,
       trailAccess: data.trailAccess,
       hillAccess: data.hillAccess,
       injuryHistory: data.injuryHistory,
       workoutMinutes: data.workoutMinutes,
+      // maintenance fields
+      maintTargetKm: data.maintTargetKm,
+      maintFreq: data.maintFreq,
+      maintSlots: data.maintSlots,
     };
     onComplete(profile, isEvent ? data.event : null);
   }
 
-  const totalSteps = isHangout ? 2 : isFitness ? 4 : 6;
+  const totalSteps = isHangout ? 2 : isMaintenance ? 3 : isFitness ? 5 : 6;
   const canNext = (() => {
     if (step === 1) return !!data.trainingGoal;
     if (step === 2) {
-      if (isEvent)   return !!(data.event?.name && data.event?.date && data.event?.distance);
-      if (isFitness) return true;
-      if (isHangout) return true;
+      if (isEvent)       return !!(data.event?.name && data.event?.date && data.event?.distance);
+      if (isFitness)     return true;
+      if (isHangout)     return true;
+      if (isMaintenance) return !!(data.maintTargetKm && data.maintFreq);
     }
     return true;
   })();
@@ -3245,11 +3277,44 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       {step === 2 && isFitness && (
         <div>
           <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
-            Let's get you moving
+            {data.returningRunner ? "Welcome back" : "Let's get you moving"}
           </div>
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
-            A few questions to set realistic goals
+            {data.returningRunner
+              ? "Tell us where you're at — we'll pick up from there"
+              : "A few questions to set realistic goals"}
           </div>
+
+          {/* Returning runner toggle */}
+          <div style={{marginBottom:16,padding:"12px 14px",background:"var(--bg)",
+            borderRadius:"var(--r)",border:"1px solid var(--rule)"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",marginBottom:8}}>
+              Are you returning to running after a break?
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              {[
+                { id:false, label:"New runner" },
+                { id:true,  label:"Returning runner" },
+              ].map(opt => (
+                <button key={String(opt.id)}
+                  onClick={() => up("returningRunner", opt.id)}
+                  style={{flex:1,padding:"8px 10px",borderRadius:"var(--r)",cursor:"pointer",
+                    fontSize:12,fontWeight:700,
+                    border:`1.5px solid ${data.returningRunner===opt.id?"var(--ink)":"var(--rule)"}`,
+                    background:data.returningRunner===opt.id?"var(--ink)":"white",
+                    color:data.returningRunner===opt.id?"white":"var(--ink3)",
+                    transition:"all .15s"}}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {data.returningRunner && (
+              <div style={{fontSize:11,color:"var(--ink4)",marginTop:8,fontStyle:"italic"}}>
+                We'll use a faster ramp rate suited to your fitness base.
+              </div>
+            )}
+          </div>
+
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             <div>
               <label className="lbl">How far can you comfortably run/walk right now?</label>
@@ -3436,8 +3501,155 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
         </div>
       )}
 
-      {/* STEP 3: Baseline performance — not for hangout */}
-      {step === 3 && !isHangout && (
+      {/* STEP 2: Maintenance setup */}
+      {step === 2 && isMaintenance && (() => {
+        const slots = data.maintSlots || ["workout","long","easy"];
+        const toggleSlot = (s) => {
+          const next = slots.includes(s) ? slots.filter(x=>x!==s) : [...slots, s];
+          if (next.length > 0) up("maintSlots", next);
+        };
+        const SLOT_OPTIONS = [
+          { value:"workout", label:"⚡ Workout", desc:"Intervals / tempo / hills" },
+          { value:"long",    label:"🏔 Long Run", desc:"Time on feet cornerstone" },
+          { value:"easy",    label:"🦶 Easy Run", desc:"Conversational recovery run" },
+          { value:"bronies", label:"☕ BRONIES",  desc:"Saturday social 7.99km" },
+        ];
+        return (
+          <div>
+            <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
+              Maintenance Mode
+            </div>
+            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:24,fontStyle:"italic"}}>
+              No race on the horizon — just hold your base
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              <div>
+                <label className="lbl">Your Name</label>
+                <input value={data.name} onChange={e=>up("name",e.target.value)} placeholder="Alex Smith" className="inp"/>
+              </div>
+              <div>
+                <label className="lbl">Club Nickname (optional)</label>
+                <input value={data.nickname} onChange={e=>up("nickname",e.target.value)} placeholder="e.g. Turbo" className="inp"/>
+              </div>
+              <div>
+                <label className="lbl">Target weekly km</label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {[20,25,30,35,40,50,60].map(km => (
+                    <button key={km} onClick={()=>up("maintTargetKm",km)}
+                      className={data.maintTargetKm===km?"btn btn-p":"btn"}
+                      style={{minWidth:52,padding:"8px 0"}}>{km}km</button>
+                  ))}
+                </div>
+                {!data.maintTargetKm && (
+                  <div style={{marginTop:8}}>
+                    <input type="number" placeholder="or type a number" className="inp"
+                      style={{width:140}}
+                      onChange={e=>up("maintTargetKm",Number(e.target.value))}/>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="lbl">Days per week</label>
+                <div style={{display:"flex",gap:8}}>
+                  {[2,3,4,5].map(n => (
+                    <button key={n} onClick={()=>up("maintFreq",n)}
+                      className={data.maintFreq===n?"btn btn-p":"btn"}
+                      style={{minWidth:44,padding:"8px 0"}}>{n}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="lbl">Session types you want</label>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {SLOT_OPTIONS.map(opt => (
+                    <div key={opt.value} onClick={()=>toggleSlot(opt.value)}
+                      style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",
+                        cursor:"pointer",borderRadius:"var(--r)",border:"1.5px solid",
+                        borderColor:slots.includes(opt.value)?"var(--ink)":"var(--rule)",
+                        background:slots.includes(opt.value)?"var(--ink)":"white",
+                        color:slots.includes(opt.value)?"white":"var(--ink)"}}>
+                      <div style={{fontWeight:700,fontSize:14}}>{opt.label}</div>
+                      <div style={{fontSize:12,opacity:.75,marginLeft:"auto"}}>{opt.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{background:"var(--gold-pale)",padding:"14px 16px",borderRadius:"var(--r)",
+                borderLeft:"3px solid #d4800a",fontSize:13,color:"#7a4f00",lineHeight:1.7}}>
+                <div style={{fontWeight:700,marginBottom:4}}>Rolling 12-week plan</div>
+                <div style={{fontStyle:"italic"}}>
+                  3 weeks building → 1 deload. Automatically rolls forward. No race date needed.
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* STEP 3: Day picker (maintenance) */}
+      {step === 3 && isMaintenance && (() => {
+        const dayPlan = data.dayPlan || {};
+        const slots   = data.maintSlots || ["workout","long","easy"];
+        const freq    = data.maintFreq  || 3;
+        // count how many active days are set
+        const activeDays = DAYS.filter(d => dayPlan[d.id] && dayPlan[d.id] !== "rest").length;
+        const SLOT_ICONS = { workout:"⚡",long:"🏔",easy:"🦶",bronies:"☕",rest:"💤" };
+
+        // cycle through maintSlots on click
+        const cycleDay = (dayId) => {
+          const current = dayPlan[dayId] || "rest";
+          if (current === "rest") {
+            // pick next needed slot type
+            const used = DAYS.map(d=>dayPlan[d.id]).filter(Boolean).filter(s=>s!=="rest");
+            const needed = slots.find(s => !used.includes(s)) || slots[0];
+            up("dayPlan", {...dayPlan, [dayId]: needed});
+          } else {
+            const idx = slots.indexOf(current);
+            const next = idx >= 0 && idx < slots.length-1 ? slots[idx+1] : "rest";
+            up("dayPlan", {...dayPlan, [dayId]: next});
+          }
+        };
+
+        return (
+          <div>
+            <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
+              Pick your training days
+            </div>
+            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:8,fontStyle:"italic"}}>
+              Tap a day to assign a session type · tap again to cycle · {freq} days recommended
+            </div>
+            <div style={{fontSize:12,color:"var(--ink4)",marginBottom:16}}>
+              {activeDays}/{freq} days selected
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {DAYS.map(d => {
+                const val  = dayPlan[d.id] || "rest";
+                const isRest = val==="rest";
+                const icon = SLOT_ICONS[val] || "💤";
+                const meta = SLOT_TYPES[val] || SLOT_TYPES.rest;
+                return (
+                  <div key={d.id} onClick={()=>cycleDay(d.id)}
+                    style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",
+                      borderRadius:"var(--r)",border:"1.5px solid",cursor:"pointer",
+                      borderColor:isRest?"var(--rule)":"var(--ink)",
+                      background:isRest?"white":"var(--ink)",
+                      color:isRest?"var(--ink3)":"white",
+                      opacity:isRest?.6:1}}>
+                    <div style={{width:36,fontSize:12,fontWeight:700,letterSpacing:.8}}>{d.short}</div>
+                    <div style={{fontSize:18}}>{icon}</div>
+                    <div style={{fontSize:13,fontWeight:isRest?400:600}}>
+                      {isRest?"Rest":meta.label}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* STEP 3: Baseline performance — not for hangout or maintenance */}
+      {step === 3 && !isHangout && !isMaintenance && (
         <div>
           <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
             Your current pace
@@ -3663,7 +3875,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
 
 
       {/* STEP 5 (fitness): Workout duration */}
-      {step === 5 && isFitness && !isHealth && (() => {
+      {step === 5 && isFitness && (() => {
         const workoutDays = DAYS.filter(d => {
           const slot = primarySlot(normaliseSlot(data.dayPlan?.[d.id]));
           return isWorkoutSlot(slot);
@@ -3751,9 +3963,84 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  UI: Bronie hangout view — fun suggestions
+//  UI: Bronie hangout view — fun suggestions + RSVP
 // ─────────────────────────────────────────────────────────────
 function HangoutView({ profile, plan, onSelectWeek }) {
+  const [rsvpStatus,   setRsvpStatus]   = useState(null);   // "in"|"out"|null
+  const [rsvpList,     setRsvpList]     = useState([]);      // [{nickname, status}]
+  const [rsvpLoading,  setRsvpLoading]  = useState(false);
+  const [rsvpError,    setRsvpError]    = useState(null);
+  const [hasSession,   setHasSession]   = useState(false);
+
+  // Next Saturday date string
+  const nextSaturday = (() => {
+    const d = new Date(TODAY);
+    const dow = d.getDay(); // 0=Sun
+    const daysUntilSat = (6 - dow + 7) % 7 || 7;
+    d.setDate(d.getDate() + daysUntilSat);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const nickname = profile?.nickname || profile?.name || "Bronie";
+
+  // Check auth + load RSVP list
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
+        setHasSession(!!session);
+
+        const { data, error } = await supabase
+          .from("bronies_rsvp")
+          .select("nickname, status")
+          .eq("run_date", nextSaturday);
+        if (cancelled || error) return;
+        setRsvpList(data || []);
+        // Find own status
+        const own = (data || []).find(r => r.nickname === nickname);
+        if (own) setRsvpStatus(own.status);
+      } catch (e) {
+        if (!cancelled) setRsvpError("Couldn't load RSVP");
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [nextSaturday, nickname]);
+
+  async function handleRsvp(status) {
+    if (rsvpLoading) return;
+    setRsvpLoading(true);
+    setRsvpError(null);
+    try {
+      const { error } = await supabase
+        .from("bronies_rsvp")
+        .upsert(
+          { run_date: nextSaturday, nickname, status, updated_at: new Date().toISOString() },
+          { onConflict: "run_date,nickname" }
+        );
+      if (error) throw error;
+      setRsvpStatus(status);
+      // Refresh list
+      const { data } = await supabase
+        .from("bronies_rsvp")
+        .select("nickname, status")
+        .eq("run_date", nextSaturday);
+      setRsvpList(data || []);
+    } catch (e) {
+      setRsvpError("Couldn't save — check connection");
+    } finally {
+      setRsvpLoading(false);
+    }
+  }
+
+  const inList  = rsvpList.filter(r => r.status === "in");
+  const satLabel = (() => {
+    const d = new Date(nextSaturday + "T00:00:00");
+    return d.toLocaleDateString("en-AU", { weekday:"long", day:"numeric", month:"short" });
+  })();
+
   return (
     <div style={{padding:"var(--pad-x)"}}>
       <div style={{background:"var(--black)",color:"white",padding:"20px 18px",
@@ -3764,6 +4051,73 @@ function HangoutView({ profile, plan, onSelectWeek }) {
         <div style={{fontSize:13,color:"#aaa",fontStyle:"italic",marginTop:4}}>
           embrace the .99 chaos
         </div>
+      </div>
+
+      {/* RSVP card */}
+      <div className="card" style={{padding:"16px",marginBottom:16}}>
+        <div style={{fontFamily:"var(--display)",fontSize:18,letterSpacing:1,marginBottom:2}}>
+          Who's coming Saturday? ☕
+        </div>
+        <div style={{fontSize:12,color:"var(--ink3)",fontStyle:"italic",marginBottom:14}}>
+          {satLabel} · 7.99km · coffee after
+        </div>
+
+        {!hasSession ? (
+          <div style={{fontSize:13,color:"var(--ink3)",fontStyle:"italic",padding:"10px 0"}}>
+            Sign in to see who's coming and RSVP
+          </div>
+        ) : (
+          <>
+            {/* RSVP buttons */}
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              <button
+                onClick={() => handleRsvp("in")}
+                disabled={rsvpLoading}
+                style={{flex:1,padding:"12px 0",borderRadius:"var(--r)",border:"none",
+                  cursor:"pointer",fontSize:15,fontWeight:700,
+                  background: rsvpStatus==="in" ? "#1a472a" : "var(--bg)",
+                  color: rsvpStatus==="in" ? "white" : "var(--ink)"}}>
+                🏃 I'm in
+              </button>
+              <button
+                onClick={() => handleRsvp("out")}
+                disabled={rsvpLoading}
+                style={{flex:1,padding:"12px 0",borderRadius:"var(--r)",border:"none",
+                  cursor:"pointer",fontSize:15,fontWeight:700,
+                  background: rsvpStatus==="out" ? "#7a1a1a" : "var(--bg)",
+                  color: rsvpStatus==="out" ? "white" : "var(--ink)"}}>
+                😴 I'm out
+              </button>
+            </div>
+
+            {rsvpError && (
+              <div style={{fontSize:12,color:"#c0392b",marginBottom:10}}>{rsvpError}</div>
+            )}
+
+            {/* Who's in */}
+            {inList.length > 0 ? (
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:"var(--ink3)",letterSpacing:.8,
+                  textTransform:"uppercase",marginBottom:8}}>
+                  {inList.length} Bronie{inList.length!==1?"s":""} in 🎉
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {inList.map((r,i) => (
+                    <div key={i} style={{background: r.nickname===nickname ? "var(--ink)" : "var(--bg)",
+                      color: r.nickname===nickname ? "white" : "var(--ink)",
+                      borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:600}}>
+                      {r.nickname}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{fontSize:12,color:"var(--ink4)",fontStyle:"italic"}}>
+                No one's confirmed yet — be the first
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <div style={{marginBottom:20}}>
@@ -3835,6 +4189,201 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 //  Hub page for tools used less frequently than the main planner.
 //  Currently: Run Fuelling Planner + Workout Creator.
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  PACE CALCULATOR SCREEN
+//  Convert between pace, speed, distance and finish time.
+// ─────────────────────────────────────────────────────────────
+function PaceCalculatorScreen({ onBack }) {
+  const [distKm,     setDistKm]     = useState("10");
+  const [paceMin,    setPaceMin]    = useState("5");
+  const [paceSec,    setPaceSec]    = useState("00");
+  const [timeHr,     setTimeHr]     = useState("");
+  const [timeMin,    setTimeMin]    = useState("");
+  const [timeSec,    setTimeSec]    = useState("");
+  const [mode,       setMode]       = useState("pace"); // "pace" or "time"
+
+  const COMMON = [
+    { label:"5km",     km:5 },
+    { label:"10km",    km:10 },
+    { label:"7.99km",  km:7.99 },
+    { label:"Half",    km:21.0975 },
+    { label:"Full",    km:42.195 },
+    { label:"50km",    km:50 },
+  ];
+
+  // Derived values
+  const dist    = parseFloat(distKm) || 0;
+  const paceS   = (parseInt(paceMin,10)||0)*60 + (parseInt(paceSec,10)||0);
+  const totalTimeS = (parseInt(timeHr,10)||0)*3600 + (parseInt(timeMin,10)||0)*60 + (parseInt(timeSec,10)||0);
+
+  function fmtTime(sec) {
+    if (!sec || sec <= 0) return "--:--:--";
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.round(sec % 60);
+    if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    return `${m}:${String(s).padStart(2,"0")}`;
+  }
+  function fmtPaceLocal(secPerKm) {
+    if (!secPerKm || secPerKm <= 0) return "--:--";
+    const m = Math.floor(secPerKm / 60);
+    const s = Math.round(secPerKm % 60);
+    return `${m}:${String(s).padStart(2,"0")}`;
+  }
+
+  // Compute the "answer"
+  const derivedTimeS  = mode === "pace" && dist > 0 && paceS > 0  ? dist * paceS : 0;
+  const derivedPaceS  = mode === "time" && dist > 0 && totalTimeS > 0 ? totalTimeS / dist : 0;
+  const speedKph      = mode === "pace"
+    ? (paceS > 0 ? 3600 / paceS : 0)
+    : (dist > 0 && totalTimeS > 0 ? dist / (totalTimeS / 3600) : 0);
+
+  // Splits for common distances
+  const commonSplits = COMMON.map(c => {
+    const s = mode === "pace" && paceS > 0 ? c.km * paceS : mode === "time" && derivedPaceS > 0 ? c.km * derivedPaceS : 0;
+    return { label: c.label, time: s };
+  });
+
+  return (
+    <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
+      {onBack && (
+        <button onClick={onBack}
+          style={{ background:"none", border:"none", cursor:"pointer", padding:"0 0 12px 0",
+            fontSize:12, color:"var(--ink3)", display:"flex", alignItems:"center", gap:4 }}>
+          ‹ Bronie Tools
+        </button>
+      )}
+      <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
+        Pace Calculator
+      </div>
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:20 }}>
+        Convert between pace, speed and finish time.
+      </div>
+
+      {/* Mode toggle */}
+      <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+        {[
+          { id:"pace", label:"Pace → Finish time" },
+          { id:"time", label:"Finish time → Pace" },
+        ].map(t => (
+          <button key={t.id} onClick={() => setMode(t.id)}
+            style={{ flex:1, padding:"9px 8px", borderRadius:"var(--r)", cursor:"pointer",
+              border:`2px solid ${mode===t.id?"var(--ink)":"var(--rule)"}`,
+              background: mode===t.id?"var(--ink)":"var(--white)",
+              color: mode===t.id?"#fff":"var(--ink3)",
+              fontSize:12, fontWeight:700, transition:"all .15s" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Distance */}
+      <div style={{ marginBottom:14 }}>
+        <label className="lbl">Distance</label>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
+          {COMMON.map(c => (
+            <button key={c.label}
+              onClick={() => setDistKm(String(c.km))}
+              className={`btn btn-o btn-sm${parseFloat(distKm)===c.km?" active":""}`}
+              style={{ fontSize:11, padding:"5px 10px" }}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <input className="inp" type="number" min="0.1" max="200" step="0.1"
+            value={distKm} onChange={e => setDistKm(e.target.value)}
+            style={{ maxWidth:100, fontFamily:"var(--mono)", fontSize:16 }} />
+          <span style={{ fontSize:13, color:"var(--ink3)" }}>km</span>
+        </div>
+      </div>
+
+      {/* Pace input (pace→time mode) */}
+      {mode === "pace" && (
+        <div style={{ marginBottom:14 }}>
+          <label className="lbl">Pace</label>
+          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <input className="inp" type="number" min="2" max="20" step="1"
+              placeholder="5" value={paceMin} onChange={e => setPaceMin(e.target.value)}
+              style={{ maxWidth:64, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+            <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
+            <input className="inp" type="number" min="0" max="59" step="1"
+              placeholder="00" value={paceSec} onChange={e => setPaceSec(String(e.target.value).padStart(2,"0"))}
+              style={{ maxWidth:64, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+            <span style={{ fontSize:13, color:"var(--ink3)" }}>min/km</span>
+          </div>
+        </div>
+      )}
+
+      {/* Time input (time→pace mode) */}
+      {mode === "time" && (
+        <div style={{ marginBottom:14 }}>
+          <label className="lbl">Finish time</label>
+          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <input className="inp" type="number" min="0" max="99" step="1"
+              placeholder="h" value={timeHr} onChange={e => setTimeHr(e.target.value)}
+              style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+            <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
+            <input className="inp" type="number" min="0" max="59" step="1"
+              placeholder="mm" value={timeMin} onChange={e => setTimeMin(e.target.value)}
+              style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+            <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
+            <input className="inp" type="number" min="0" max="59" step="1"
+              placeholder="ss" value={timeSec} onChange={e => setTimeSec(e.target.value)}
+              style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+          </div>
+        </div>
+      )}
+
+      {/* Result card */}
+      <div className="card" style={{ padding:"16px 18px", marginBottom:20, background:"var(--ink)",
+        color:"white", borderRadius:"var(--r)" }}>
+        {mode === "pace" ? (
+          <>
+            <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
+              opacity:.7, marginBottom:4 }}>Finish time</div>
+            <div style={{ fontFamily:"var(--mono)", fontSize:32, fontWeight:800, lineHeight:1 }}>
+              {fmtTime(derivedTimeS)}
+            </div>
+            <div style={{ fontSize:12, opacity:.7, marginTop:6 }}>
+              {speedKph > 0 ? `${speedKph.toFixed(2)} km/h` : ""}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
+              opacity:.7, marginBottom:4 }}>Required pace</div>
+            <div style={{ fontFamily:"var(--mono)", fontSize:32, fontWeight:800, lineHeight:1 }}>
+              {fmtPaceLocal(derivedPaceS)}<span style={{ fontSize:16, opacity:.7 }}> /km</span>
+            </div>
+            <div style={{ fontSize:12, opacity:.7, marginTop:6 }}>
+              {speedKph > 0 ? `${speedKph.toFixed(2)} km/h` : ""}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Common distance splits */}
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+        textTransform:"uppercase", marginBottom:10 }}>Common splits</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:0, border:"1px solid var(--rule)",
+        borderRadius:"var(--r)", overflow:"hidden" }}>
+        {commonSplits.map((c, i) => (
+          <div key={c.label} style={{ display:"flex", alignItems:"center",
+            padding:"10px 14px", borderBottom: i < commonSplits.length-1 ? "1px solid var(--rule)" : "none",
+            background:"var(--white)" }}>
+            <span style={{ flex:1, fontSize:13, fontWeight:600, color:"var(--ink)" }}>{c.label}</span>
+            <span style={{ fontFamily:"var(--mono)", fontSize:14, fontWeight:700,
+              color: c.time > 0 ? "var(--accent)" : "var(--ink4)" }}>
+              {c.time > 0 ? fmtTime(c.time) : "—"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function BronieToolsScreen({ onNav }) {
   const TOOLS = [
     {
@@ -3848,6 +4397,12 @@ function BronieToolsScreen({ onNav }) {
       icon:  "⚡",
       title: "Workout Creator",
       desc:  "Write a workout in plain language and download a Garmin-ready file with coaching notes on every step.",
+    },
+    {
+      id:    "pace",
+      icon:  "⏱️",
+      title: "Pace Calculator",
+      desc:  "Convert between pace, speed and finish time. Great for race-week planning — figure out your splits from a target time or work backwards from a distance.",
     },
   ];
 
@@ -3886,11 +4441,148 @@ function BronieToolsScreen({ onNav }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+//  APPLE WATCH STEP ROW
+//  A single row in the Apple Watch manual-entry guide.
+//  Matches the visual language of the iPhone Fitness app:
+//  step type on the left (Warmup / Work / Recovery / Cooldown)
+//  and goal type on the right (Time / Distance / Open).
+// ─────────────────────────────────────────────────────────────
+function AppleWatchStepRow({ step, indented = false }) {
+  const { kind, distM, durationSec, paceSecKm } = step;
+
+  // Step type label + colour — mirroring Fitness app colours
+  const TYPE = {
+    warmup:   { label:"Warmup",   bg:"#E3F2FD", color:"#1565C0" },
+    cooldown: { label:"Cooldown", bg:"#E3F2FD", color:"#1565C0" },
+    interval: { label:"Work",     bg:"#FCE4EC", color:"#C62828" },
+    recovery: { label:"Recovery", bg:"#E8F5E9", color:"#2E7D32" },
+    rest:     { label:"Recovery", bg:"#E8F5E9", color:"#2E7D32" },
+  };
+  const t = TYPE[kind] || TYPE.interval;
+
+  // Goal description
+  function fmtDur(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return s > 0 ? `${m}:${String(s).padStart(2,"0")}` : `${m} min`;
+  }
+  function fmtDist(m) {
+    return m >= 1000 ? `${m/1000}km` : `${m}m`;
+  }
+
+  const goal = distM != null
+    ? `Distance · ${fmtDist(distM)}`
+    : durationSec != null
+      ? `Time · ${fmtDur(durationSec)}`
+      : "Open";
+
+  // Pace alert range
+  const paceNote = paceSecKm
+    ? (() => {
+        const [slow, fast] = paceZone(paceSecKm);
+        return `Pace ${fmtPaceStr(fast)}–${fmtPaceStr(slow)}/km`;
+      })()
+    : null;
+
+  return (
+    <div style={{
+      display:"flex", alignItems:"center", gap:10,
+      padding: indented ? "9px 14px 9px 28px" : "9px 14px",
+      borderBottom:"1px solid var(--rule)",
+      background:"var(--white)" }}>
+      {/* Type pill */}
+      <div style={{
+        background: t.bg, color: t.color,
+        fontSize:10, fontWeight:700, padding:"3px 8px",
+        borderRadius:10, flexShrink:0, minWidth:62, textAlign:"center",
+        letterSpacing:.3 }}>
+        {t.label}
+      </div>
+      {/* Goal + pace */}
+      <div style={{ flex:1 }}>
+        <div style={{ fontSize:12, fontWeight:600, color:"var(--ink)" }}>{goal}</div>
+        {paceNote && (
+          <div style={{ fontSize:10, color:"var(--ink3)", marginTop:1 }}>
+            🎯 {paceNote}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WorkoutCreatorScreen({ onBack }) {
-  const [text,       setText]       = useState("");
-  const [parsed,     setParsed]     = useState(null);  // { name, steps, errors }
+
+  // ── State ─────────────────────────────────────────────────
+  const [text,        setText]        = useState("");
+  const [parsed,      setParsed]      = useState(null);
   const [workoutName, setWorkoutName] = useState("");
-  const [generated,  setGenerated]  = useState(false);
+  const [generated,   setGenerated]   = useState(false);
+  const [watchView,   setWatchView]   = useState(false); // false = Garmin, true = Apple Watch
+
+  // ── Apple Watch instruction builder ───────────────────────
+  // Converts the parsed AST into plain-text steps matching exactly what
+  // you tap in iPhone Fitness app → Workout → Outdoor Run → ⋯ → Custom → +
+  function buildAppleWatchInstructions(name, steps) {
+    const lines = [];
+    lines.push(`WORKOUT: ${name}`);
+    lines.push("");
+    lines.push("In iPhone Fitness app:");
+    lines.push("  Workout → Outdoor Run → ⋯ → Custom → +");
+    lines.push("");
+
+    function fmtDur(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return s > 0 ? `${m}:${String(s).padStart(2,"0")} min` : `${m} min`;
+    }
+    function fmtDist(m) {
+      return m >= 1000 ? `${m/1000}km` : `${m}m`;
+    }
+    function fmtPaceAlert(secPerKm) {
+      if (!secPerKm) return "";
+      const [slow, fast] = paceZone(secPerKm);
+      return `  ↳ Pace alert: ${fmtPaceStr(fast)}/km – ${fmtPaceStr(slow)}/km`;
+    }
+
+    function stepLine(step, prefix = "") {
+      const { kind, distM, durationSec, paceSecKm } = step;
+
+      // How to describe the goal type
+      const goalType  = distM != null      ? `Distance  ${fmtDist(distM)}`
+                      : durationSec != null ? `Time      ${fmtDur(durationSec)}`
+                      : "Open";
+
+      // Apple Watch step type label
+      const typeLabel = kind === "warmup"   ? "Warmup   "
+                      : kind === "cooldown" ? "Cooldown "
+                      : kind === "recovery" ? "Recovery "
+                      : kind === "rest"     ? "Recovery "
+                      :                      "Work     ";
+
+      lines.push(`${prefix}  ${typeLabel}  ${goalType}`);
+      if (paceSecKm) lines.push(`${prefix}  ${fmtPaceAlert(paceSecKm)}`);
+    }
+
+    steps.forEach(step => {
+      if (step.kind === "repeat") {
+        lines.push(`  ── Repeat ${step.reps}× ─────────────────────`);
+        lines.push(`  Tap "Add Repeat" and set count to ${step.reps}`);
+        step.children.forEach(child => stepLine(child, "  "));
+        lines.push("");
+      } else {
+        stepLine(step);
+      }
+    });
+
+    lines.push("");
+    lines.push("──────────────────────────────────────────");
+    lines.push("Tap Create Workout when done.");
+    lines.push("It syncs to your Apple Watch automatically.");
+    lines.push("Open Workout app → Outdoor Run → find your workout.");
+    return lines.join("\n");
+  }
 
   const EXAMPLES = [
     {
@@ -4077,44 +4769,131 @@ function WorkoutCreatorScreen({ onBack }) {
         </div>
       )}
 
-      {/* Preview */}
+      {/* ── Output ─────────────────────────────────────────── */}
       {hasSteps && (
         <div>
-          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
-            textTransform:"uppercase", marginBottom:8 }}>Preview</div>
 
-          {/* Workout name edit */}
+          {/* Workout name */}
           <div style={{ marginBottom:12 }}>
             <label className="lbl">Workout name</label>
             <input className="inp" value={workoutName}
               onChange={e => setWorkoutName(e.target.value)} />
           </div>
 
-          {/* Step list */}
-          <div style={{ marginBottom:16 }}>
-            {parsed.steps.map((step, i) => (
-              <div key={i}>{renderStep(step)}</div>
+          {/* Device tab switcher */}
+          <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+            {[
+              { id:false, label:"⌚ Garmin",      sub:"download .json" },
+              { id:true,  label:"🍎 Apple Watch", sub:"manual entry guide" },
+            ].map(t => (
+              <button key={String(t.id)}
+                onClick={() => { setWatchView(t.id); setGenerated(false); }}
+                style={{ flex:1, padding:"9px 8px", borderRadius:"var(--r)",
+                  cursor:"pointer", transition:"all .15s", textAlign:"center",
+                  border:`2px solid ${watchView === t.id ? "var(--ink)" : "var(--rule)"}`,
+                  background: watchView === t.id ? "var(--ink)" : "var(--white)",
+                  color: watchView === t.id ? "#fff" : "var(--ink3)" }}>
+                <div style={{ fontSize:12, fontWeight:700 }}>{t.label}</div>
+                <div style={{ fontSize:10, opacity:.7, marginTop:1 }}>{t.sub}</div>
+              </button>
             ))}
           </div>
 
-          {/* Download button */}
-          <button className="btn btn-p" style={{ width:"100%" }}
-            onClick={handleDownload}>
-            ⬇ Download Garmin workout (.json)
-          </button>
-
-          {generated && (
-            <div style={{ marginTop:10, fontSize:12, color:"var(--ink3)",
-              textAlign:"center", lineHeight:1.5 }}>
-              ✓ Downloaded. Go to{" "}
-              <a href="https://connect.garmin.com/modern/training/workouts"
-                target="_blank" rel="noopener noreferrer"
-                style={{ color:"var(--accent)" }}>
-                Garmin Connect → Workouts
-              </a>
-              {" "}and import the file.
+          {/* ── GARMIN tab ─────────────────────────────────── */}
+          {!watchView && (
+            <div>
+              {/* Step preview */}
+              <div style={{ marginBottom:16 }}>
+                {parsed.steps.map((step, i) => (
+                  <div key={i}>{renderStep(step)}</div>
+                ))}
+              </div>
+              <button className="btn btn-p" style={{ width:"100%" }}
+                onClick={handleDownload}>
+                ⬇ Download Garmin workout (.json)
+              </button>
+              {generated && (
+                <div style={{ marginTop:10, fontSize:12, color:"var(--ink3)",
+                  textAlign:"center", lineHeight:1.5 }}>
+                  ✓ Downloaded — go to{" "}
+                  <a href="https://connect.garmin.com/modern/training/workouts"
+                    target="_blank" rel="noopener noreferrer"
+                    style={{ color:"var(--accent)" }}>
+                    Garmin Connect → Workouts
+                  </a>
+                  {" "}and import the file.
+                </div>
+              )}
             </div>
           )}
+
+          {/* ── APPLE WATCH tab ────────────────────────────── */}
+          {watchView && (
+            <div>
+              {/* How-to banner */}
+              <div style={{ padding:"10px 14px", background:"var(--bg)",
+                border:"1px solid var(--rule)", borderRadius:"var(--r)",
+                marginBottom:12, fontSize:11, color:"var(--ink2)", lineHeight:1.6 }}>
+                <div style={{ fontWeight:700, color:"var(--ink)", marginBottom:4 }}>
+                  How to add this to Apple Watch
+                </div>
+                Open <strong>Fitness</strong> app on your iPhone →{" "}
+                <strong>Workout</strong> → <strong>Outdoor Run</strong> →
+                tap <strong>⋯</strong> → <strong>Custom</strong> → <strong>+</strong>.
+                Follow the steps below to build it. It syncs to your Watch automatically.
+              </div>
+
+              {/* Plain-text instruction block */}
+              <div style={{ background:"var(--white)", border:"1px solid var(--rule)",
+                borderRadius:"var(--r)", overflow:"hidden", marginBottom:12 }}>
+                {/* Render steps visually */}
+                {parsed.steps.map((step, i) => {
+                  if (step.kind === "repeat") {
+                    return (
+                      <div key={i}>
+                        {/* Repeat header */}
+                        <div style={{ padding:"8px 14px",
+                          background:"#FFF8E1", borderBottom:"1px solid #F0E0A0",
+                          display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontSize:11, fontWeight:700,
+                            color:"#B8860B", fontFamily:"var(--mono)" }}>
+                            REPEAT ×{step.reps}
+                          </span>
+                          <span style={{ fontSize:11, color:"#B8860B" }}>
+                            — tap "Add Repeat", set count to {step.reps}
+                          </span>
+                        </div>
+                        {/* Children */}
+                        {step.children.map((child, j) => (
+                          <AppleWatchStepRow key={j} step={child} indented />
+                        ))}
+                      </div>
+                    );
+                  }
+                  return <AppleWatchStepRow key={i} step={step} />;
+                })}
+              </div>
+
+              {/* Copy button */}
+              <button className="btn btn-p" style={{ width:"100%", marginBottom:8 }}
+                onClick={() => {
+                  const text = buildAppleWatchInstructions(
+                    workoutName || parsed.name, parsed.steps
+                  );
+                  navigator.clipboard?.writeText(text)
+                    .then(() => setGenerated(true))
+                    .catch(() => setGenerated(true));
+                }}>
+                📋 Copy as plain text
+              </button>
+              {generated && (
+                <div style={{ fontSize:11, color:"var(--ink3)", textAlign:"center" }}>
+                  ✓ Copied — paste into Notes or Messages to keep handy at the track
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
       )}
 
@@ -4619,6 +5398,75 @@ function NutritionScanner({ onAdd }) {
 //  Session 2: Course setup + fuel inventory (input half).
 //  Session 3 will add the plan output section below the inputs.
 // ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+//  RACE MODE PANEL
+//  Shown above RacePlanOutput on race day (or the day before).
+//  Displays key targets: goal time, pacing strategy, top fuelling cues.
+// ─────────────────────────────────────────────────────────────
+function RaceModePanel({ race, strategy, validLegs }) {
+  const today    = new Date(TODAY);
+  const raceDate = race?.date ? new Date(race.date + "T00:00:00") : null;
+  if (!raceDate) return null;
+
+  today.setHours(0,0,0,0);
+  raceDate.setHours(0,0,0,0);
+  const daysOut = Math.round((raceDate - today) / (1000*60*60*24));
+
+  // Only show on race day or day before
+  if (daysOut > 1 || daysOut < 0) return null;
+
+  const isRaceDay = daysOut === 0;
+  const totalDist = validLegs.reduce((s, l) => s + (l.distKm || 0), 0);
+  const totalMins = validLegs.reduce((s, l) => s + (l.durationMin || 0), 0);
+  const hh = Math.floor(totalMins / 60);
+  const mm = Math.round(totalMins % 60);
+  const goalTime = totalMins > 0 ? `${hh}h ${mm}m` : null;
+
+  return (
+    <div style={{margin:"0 var(--pad-x) 12px",padding:"16px",
+      background: isRaceDay ? "#1a472a" : "var(--ink)",
+      color:"white",borderRadius:"var(--r)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+        <div style={{fontSize:24}}>{isRaceDay ? "🏁" : "📅"}</div>
+        <div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.7}}>
+            {isRaceDay ? "Race Day" : "Tomorrow is Race Day"}
+          </div>
+          <div style={{fontSize:18,fontWeight:800}}>{race.title || "Race"}</div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:12}}>
+        {totalDist > 0 && (
+          <div>
+            <div style={{fontSize:10,opacity:.6,letterSpacing:.6,textTransform:"uppercase"}}>Distance</div>
+            <div style={{fontSize:20,fontWeight:800}}>{totalDist.toFixed(1)}km</div>
+          </div>
+        )}
+        {goalTime && (
+          <div>
+            <div style={{fontSize:10,opacity:.6,letterSpacing:.6,textTransform:"uppercase"}}>Goal Time</div>
+            <div style={{fontSize:20,fontWeight:800}}>{goalTime}</div>
+          </div>
+        )}
+        {strategy?.startIntensity && (
+          <div>
+            <div style={{fontSize:10,opacity:.6,letterSpacing:.6,textTransform:"uppercase"}}>Start</div>
+            <div style={{fontSize:16,fontWeight:700,textTransform:"capitalize"}}>{strategy.startIntensity}</div>
+          </div>
+        )}
+      </div>
+
+      {isRaceDay && (
+        <div style={{fontSize:12,opacity:.8,fontStyle:"italic",borderTop:"1px solid rgba(255,255,255,.2)",
+          paddingTop:10}}>
+          Start easy. Negative split if you can. You've done the work. 🙌
+        </div>
+      )}
+    </div>
+  );
+}
 
 function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAdd, onNutritionLibRemove }) {
   const { race = { title:"", date:"", legs:[] }, strategy = DEFAULT_STRATEGY } = racePlan || {};
@@ -5276,6 +6124,9 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
 
       <div style={{ borderBottom:"1px solid var(--rule)", marginBottom:16 }} />
 
+      {/* ══ Race Mode Panel — shown on race day / day before ══ */}
+      <RaceModePanel race={race} strategy={strategy} validLegs={validLegs} />
+
       {/* ══ SECTION 3: Race Plan Output ══════════════════════ */}
       <RacePlanOutput race={race} strategy={strategy} validLegs={validLegs} onChange={onChange} racePlan={racePlan} />
 
@@ -5629,6 +6480,60 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
         );
       })}
 
+      {/* ── Copy plain text ──────────────────────────────────── */}
+      {(() => {
+        const [copied, setCopied] = React.useState(false);
+        function buildPlainText() {
+          const lines = [];
+          lines.push(`RACE PLAN — ${race.title || "My Race"}`);
+          if (race.date) lines.push(`Date: ${race.date}`);
+          lines.push(`Overall pace: ${fmtPaceStr(plan.globalPaceMinKm)}/km`);
+          lines.push(`Days to race: ${plan.daysToGo !== null ? plan.daysToGo : "—"}`);
+          lines.push(`Total fuel items: ${plan.totalItems}  |  Peak flasks: ${plan.peakFlasks}`);
+          lines.push("");
+          lines.push("── LEG BREAKDOWN ──────────────────────────────────────");
+          plan.legs.forEach((leg, i) => {
+            lines.push("");
+            lines.push(`Leg ${i+1}: ${leg.name || "Checkpoint"} — ${leg.distKm}km${leg.climbM > 0 ? `, +${leg.climbM}m` : ""}`);
+            if (leg.cutoff)   lines.push(`  ⏱ Cutoff: ${leg.cutoff}`);
+            lines.push(`  Est. time: ${leg.estMins ? fmtLegTime(leg.estMins) : "—"}`);
+            lines.push(`  Carbs: ${Math.round(leg.carbsG||0)}g  |  Fluid: ${Math.round((leg.fluidMl||0)/1000*10)/10}L`);
+            lines.push(`  Solids: ${leg.vestItems||0}  |  Flasks: ${leg.flasks||0}`);
+            if (leg.drinkMixNote) lines.push(`  💧 ${leg.drinkMixNote}`);
+            if (leg.aidStationStock) lines.push(`  Aid station: ${leg.aidStationStock}`);
+            if (leg.aidStationSuggestion) lines.push(`  🍌 ${leg.aidStationSuggestion}`);
+            if (leg.caffeine) lines.push(`  ☕ ${leg.caffeine}`);
+          });
+          lines.push("");
+          lines.push("── GEAR CHECKLIST ─────────────────────────────────────");
+          ["critical","required","optional"].forEach(status => {
+            const items = plan.gear.filter(g => g.status === status);
+            if (items.length === 0) return;
+            lines.push(`${status.toUpperCase()}:`);
+            items.forEach(g => lines.push(`  ${checkedSet.has(g.item) ? "[x]" : "[ ]"} ${g.item}`));
+          });
+          return lines.join("\n");
+        }
+        return (
+          <div style={{ marginTop:20 }}>
+            <button className="btn btn-p" style={{ width:"100%" }}
+              onClick={() => {
+                const txt = buildPlainText();
+                navigator.clipboard?.writeText(txt).catch(() => {});
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2500);
+              }}>
+              📋 {copied ? "Copied!" : "Copy race plan as plain text"}
+            </button>
+            {copied && (
+              <div style={{ fontSize:11, color:"var(--ink3)", textAlign:"center", marginTop:6 }}>
+                ✓ Paste into Notes or Messages to have it handy on race day
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
     </div>
   );
 }
@@ -5730,7 +6635,7 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
             {id:"profile",   label:"Profile"},
           ].map(t => (
             <button key={t.id} onClick={() => onNav(t.id)}
-              className={`nav-tab${(screen === t.id || (t.id === "tools" && (screen === "fuel" || screen === "workouts"))) ? " active" : ""}`}>
+              className={`nav-tab${(screen === t.id || (t.id === "tools" && (screen === "fuel" || screen === "workouts" || screen === "pace"))) ? " active" : ""}`}>
               {t.label}
             </button>
           ))}
@@ -5743,7 +6648,7 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
 // ─────────────────────────────────────────────────────────────
 //  UI: Welcome screen
 // ─────────────────────────────────────────────────────────────
-function WelcomeScreen({ onStart, onDemo }) {
+function WelcomeScreen({ onStart, onSignIn }) {
   return (
     <div style={{background:"var(--nav)",minHeight:"calc(100vh - 80px)",padding:"32px var(--pad-x)",
       display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
@@ -5760,11 +6665,30 @@ function WelcomeScreen({ onStart, onDemo }) {
           textShadow:"4px 4px 0 #C49A00,6px 6px 0 #8B6800"}}>
           .99 TRAINING
         </div>
+
+        {/* Returning user — sign in to load existing plan */}
+        <div style={{background:"rgba(255,200,0,0.12)",border:"2px solid var(--gold)",
+          borderRadius:8,padding:"18px 20px",marginBottom:12,textAlign:"left"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--gold)",
+            marginBottom:4,letterSpacing:.5}}>
+            Already a Bronie?
+          </div>
+          <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginBottom:12,lineHeight:1.5}}>
+            Sign in to load your existing plan on this device.
+          </div>
+          <button onClick={onSignIn} className="btn btn-p"
+            style={{width:"100%",padding:12,fontSize:14,letterSpacing:.5,
+              background:"var(--gold)",color:"#1A3060",border:"none",fontWeight:700}}>
+            ☁ Load my profile →
+          </button>
+        </div>
+
+        {/* New user — build a fresh plan */}
         <div style={{background:"rgba(30,58,110,0.85)",border:"2px solid rgba(160,200,240,0.5)",
           borderRadius:8,padding:"24px 20px",marginBottom:16,textAlign:"left"}}>
           <div style={{fontFamily:"var(--sans)",fontSize:18,fontWeight:700,color:"white",
             marginBottom:4,letterSpacing:.5,textAlign:"center"}}>
-            BUILD YOUR TRAINING PLAN
+            NEW? BUILD YOUR TRAINING PLAN
           </div>
           <div style={{fontSize:13,color:"var(--gold)",marginBottom:20,fontStyle:"italic",textAlign:"center"}}>
             A few quick questions and you're running
@@ -5773,67 +6697,11 @@ function WelcomeScreen({ onStart, onDemo }) {
             Let's go →
           </button>
         </div>
-        <div style={{fontSize:12,color:"rgba(255,255,255,.65)",marginBottom:10,fontStyle:"italic"}}>
-          or skip the questions
-        </div>
-        <button onClick={onDemo} style={{background:"rgba(160,200,240,0.25)",border:"2px solid rgba(160,200,240,0.6)",
-          borderRadius:6,color:"white",fontFamily:"var(--sans)",fontWeight:700,fontSize:14,
-          padding:"10px 24px",cursor:"pointer",width:"100%"}}>
-          ⭐ Try a demo scenario
-        </button>
+
         <div style={{marginTop:32,fontSize:14,color:"rgba(255,255,255,.55)",letterSpacing:1}}>
           embrace the <strong style={{color:"var(--gold)"}}>
             .99
           </strong> chaos
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-//  UI: Demo modal
-// ─────────────────────────────────────────────────────────────
-function DemoModal({ onPick, onClose }) {
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:200,
-      display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-      onClick={onClose}>
-      <div style={{background:"white",borderRadius:"var(--r)",maxWidth:480,width:"100%",
-        maxHeight:"85vh",overflowY:"auto",padding:20}}
-        onClick={e => e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
-          <div>
-            <div style={{fontFamily:"var(--display)",fontSize:24,letterSpacing:1}}>Demo Scenarios</div>
-            <div style={{fontSize:13,color:"var(--ink3)",fontStyle:"italic",marginTop:2}}>
-              Pre-loaded profiles — instantly explore what the app produces
-            </div>
-          </div>
-          <button onClick={onClose} className="btn btn-g btn-sm">✕</button>
-        </div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {Object.entries(DEMO_SCENARIOS).map(([key, s]) => (
-            <button key={key} onClick={() => onPick(key)}
-              style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",
-                background:"var(--bg)",border:"1.5px solid var(--rule)",
-                borderRadius:"var(--r)",cursor:"pointer",textAlign:"left",fontFamily:"var(--sans)"}}
-              onMouseEnter={e => { e.currentTarget.style.borderColor="var(--accent)"; e.currentTarget.style.background="var(--accent-light)"; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor="var(--rule)"; e.currentTarget.style.background="var(--bg)"; }}>
-              <div style={{fontSize:24,flexShrink:0}}>
-                {s.event?.type === "trail" ? "🏔" : s.profile.trainingGoal === "hangout" ? "☕" : "🏃"}
-              </div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:14,fontWeight:700,color:"var(--ink)"}}>{s.label}</div>
-                <div style={{fontSize:11,color:"var(--ink3)",marginTop:1,fontStyle:"italic"}}>{s.desc}</div>
-                {s.event && (
-                  <div style={{fontSize:10,color:"var(--ink4)",marginTop:2}}>
-                    {s.event.distance} · {s.event.location} · {fmtDate(s.event.date)}
-                  </div>
-                )}
-              </div>
-              <span style={{color:"var(--ink3)"}}>→</span>
-            </button>
-          ))}
         </div>
       </div>
     </div>
@@ -6518,7 +7386,7 @@ function AuthScreen({ onAuth, onSkip, skin }) {
         <div style={{fontFamily:"var(--mono)",fontSize:24,fontWeight:700,
           color:"var(--gold)",marginTop:4}}>.99</div>
         <div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:4,letterSpacing:1}}>
-          {mode === "login"  && "Welcome back, Bronie"}
+          {mode === "login"  && "Sign in to load your plan"}
           {mode === "signup" && "Join the Bronies"}
           {mode === "forgot" && "Reset your password"}
         </div>
@@ -6553,7 +7421,7 @@ function AuthScreen({ onAuth, onSkip, skin }) {
             </div>
             <button type="submit" className="btn btn-p"
               disabled={loading} style={{width:"100%",marginTop:4,padding:"13px"}}>
-              {loading ? "Logging in…" : "Log In"}
+              {loading ? "Loading your plan…" : "Sign In & Load Plan"}
             </button>
             <button type="button" onClick={() => { setMode("forgot"); setError(null); }}
               style={{background:"none",border:"none",fontSize:12,color:"var(--ink3)",
@@ -6772,12 +7640,13 @@ export default function App() {
   const [selWeek,        setSelWeek]        = useState(null);
   const [toast,          setToast]          = useState("");
   const [feedbackMap,    setFeedbackMap]    = useState({});
-  const [showDemo,       setShowDemo]       = useState(false);
   const [confirmCfg,     setConfirmCfg]     = useState(null);
   const [sessionOverrides, setSessionOverrides] = useState({});
   const [daySlotOverrides, setDaySlotOverrides] = useState({});
   const [completionMap,    setCompletionMap]    = useState({});
   const [feedbackOpen,     setFeedbackOpen]     = useState(false); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
+  const [planRebuildMsg,   setPlanRebuildMsg]   = useState("");   // banner shown after plan rebuild
+  const [showWhatsNext,    setShowWhatsNext]    = useState(false); // post-race "What's next?" modal
   const [skin,           setSkinState]      = useState("default"); // "default" | "8bit"
   const [racePlan,       setRacePlanState]  = useState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
   const [nutritionLib,   setNutritionLib]   = useState([]); // persisted personal nutrition library
@@ -6868,11 +7737,32 @@ export default function App() {
   async function handleAuthSuccess() {
     setShowAuth(false);
     // Brief delay to ensure the Supabase SDK has fully persisted the session before
-    // store.get() calls getUid() — avoids a race on fresh signins.
-    await new Promise(r => setTimeout(r, 150));
+    // store.get() calls getUid() — avoids a race on fresh sign-ins.
+    await new Promise(r => setTimeout(r, 300));
+
+    // Load cloud data first. loadPersistedState already calls setScreen("plan")
+    // when it finds a profile — so if the cloud has data the user goes straight
+    // there without touching onboarding.
     await loadPersistedState();
+
+    // After loading: if a profile was found (hasData will now be true via setProfile),
+    // show a personalised welcome-back toast. If nothing was found, the user is still
+    // on the welcome screen and can start onboarding fresh.
+    const cloudCheck = await store.get("bep6_profile");
+    if (cloudCheck) {
+      let name = "";
+      try { name = JSON.parse(cloudCheck.value)?.name || ""; } catch {}
+      showToast(name
+        ? `Welcome back, ${name}! Your plan is loaded ☁`
+        : "Your plan is loaded ☁");
+    } else {
+      // Genuinely new account — no cloud data exists yet.
+      // Stay on welcome so they go through onboarding.
+      showToast("Signed in — build your plan to get started");
+    }
+
+    // Migrate any offline localStorage data up to Supabase (non-destructive).
     try { await store.migrateLocalToSupabase(); } catch {}
-    showToast("Signed in — your plan is now synced ☁");
   }
 
   // Viewport meta for iPhone — runs once, before any early return
@@ -6926,6 +7816,7 @@ export default function App() {
   async function handleOnboardingComplete(p, e) {
     // Stamp the original plan start date if not already set, so weeks anchor to a
     // fixed point in time and past weeks remain visible as the plan progresses.
+    const isRebuild = !!profile; // already had a profile → this is a rebuild
     const withStart = { ...p, planStartDate: p.planStartDate || todaySydneyStr() };
     setProfile(withStart); setEvent(e); setFeedbackMap({});
     setSessionOverrides({}); setDaySlotOverrides({});
@@ -6939,23 +7830,12 @@ export default function App() {
     }
     try { await store.set("bep6_fb", JSON.stringify({})); } catch {}
     setScreen("plan");
-    showToast(e ? "Plan built — let's go!" : "Profile saved");
-  }
-
-  async function loadDemo(key) {
-    const s = DEMO_SCENARIOS[key];
-    if (!s) return;
-    setProfile(s.profile); setEvent(s.event); setFeedbackMap({});
-    try { await store.set("bep6_profile", JSON.stringify(s.profile)); } catch {}
-    if (s.event) {
-      try { await store.set("bep6_event", JSON.stringify(s.event)); } catch {}
+    if (isRebuild) {
+      setPlanRebuildMsg("Plan rebuilt — fresh start 🔄");
+      setTimeout(() => setPlanRebuildMsg(""), 4000);
     } else {
-      try { await store.delete("bep6_event"); } catch {}
+      showToast(e ? "Plan built — let's go!" : "Profile saved");
     }
-    try { await store.set("bep6_fb", JSON.stringify({})); } catch {}
-    setShowDemo(false);
-    setScreen("plan");
-    showToast(`Loaded: ${s.label}`);
   }
 
   function handleFeedback(weekNum, choice) {
@@ -7212,7 +8092,10 @@ export default function App() {
         })()}
 
         {screen === "welcome" && (
-          <WelcomeScreen onStart={() => setScreen("onboarding")} onDemo={() => setShowDemo(true)}/>
+          <WelcomeScreen
+            onStart={() => setScreen("onboarding")}
+            onSignIn={() => setShowAuth(true)}
+          />
         )}
 
         {screen === "onboarding" && (
@@ -7249,6 +8132,15 @@ export default function App() {
 
         {screen === "plan" && hasData && (
           <div>
+            {/* Plan rebuild notification */}
+            {planRebuildMsg && (
+              <div style={{margin:"8px var(--pad-x) 0",padding:"10px 14px",
+                borderRadius:"var(--r)",background:"#E8F5E9",color:"#1a472a",
+                fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:8,
+                border:"1px solid #a5d6a7"}}>
+                ✓ {planRebuildMsg}
+              </div>
+            )}
             {isHangout ? (
               <HangoutView profile={profile} plan={planWithOverrides} onSelectWeek={setSelWeek}/>
             ) : (
@@ -7303,7 +8195,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                <PlanOverview plan={planWithOverrides} event={event} onSelectWeek={setSelWeek} feedbackMap={feedbackMap} completionMap={completionMap} onCompletion={handleCompletion} onNav={s => { setSelWeek(null); setScreen(s); }}/>
+                <PlanOverview plan={planWithOverrides} profile={profile} event={event} onSelectWeek={setSelWeek} feedbackMap={feedbackMap} completionMap={completionMap} onCompletion={handleCompletion} onNav={s => { setSelWeek(null); setScreen(s); }} onFeedback={handleFeedback} onRaceFinished={() => setShowWhatsNext(true)}/>
               </>
             )}
           </div>
@@ -7450,6 +8342,9 @@ export default function App() {
 
         {screen === "workouts" && hasData && (
           <WorkoutCreatorScreen onBack={() => setScreen("tools")} />
+        )}
+        {screen === "pace" && hasData && (
+          <PaceCalculatorScreen onBack={() => setScreen("tools")} />
         )}
 
         {screen === "race" && hasData && (
@@ -7622,8 +8517,6 @@ export default function App() {
             onClose={() => setSelWeek(null)}/>
         )}
 
-        {showDemo && <DemoModal onPick={loadDemo} onClose={() => setShowDemo(false)}/>}
-
         <ConfirmDialog
           open={!!confirmCfg}
           title={confirmCfg?.title}
@@ -7643,6 +8536,45 @@ export default function App() {
 
       {/* Feedback + Bug report floating widget */}
       <FeedbackWidget currentScreen={screen} open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+
+      {/* Post-race "What's next?" modal */}
+      {showWhatsNext && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:400,
+          display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={() => setShowWhatsNext(false)}>
+          <div style={{background:"white",borderRadius:"var(--r) var(--r) 0 0",
+            width:"100%",maxWidth:560,padding:"28px var(--pad-x) 40px"}}
+            onClick={e => e.stopPropagation()}>
+            <div style={{fontFamily:"var(--display)",fontSize:28,letterSpacing:1,marginBottom:8}}>
+              Race done! 🎉
+            </div>
+            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:24,fontStyle:"italic"}}>
+              You crossed the finish line. What's the next chapter?
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <button className="btn btn-p" style={{padding:"14px 0"}}
+                onClick={() => { setShowWhatsNext(false); setScreen("onboarding"); }}>
+                🎯 Train for a new event
+              </button>
+              <button className="btn" style={{padding:"14px 0"}}
+                onClick={() => { setShowWhatsNext(false);
+                  // Switch to maintenance
+                  const next = { ...profile, trainingGoal:"maintenance" };
+                  setProfile(next);
+                  try { store.set("bep6_profile", JSON.stringify(next)); } catch {}
+                  setPlan(buildPlan(next, null, feedbackMap));
+                  showToast("Switched to Maintenance Mode");
+                }}>
+                🔄 Switch to Maintenance Mode
+              </button>
+              <button className="btn" style={{padding:"14px 0"}}
+                onClick={() => setShowWhatsNext(false)}>
+                ✕ Maybe later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div style={{position:"fixed",bottom:32,left:"50%",transform:"translateX(-50%)",

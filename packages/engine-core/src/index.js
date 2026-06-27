@@ -45,3 +45,6 @@ export {
   SLOT_TYPES,
   PACE_MULTIPLIERS,
 } from "./constants.js";
+
+// Maintenance engine — rolling 12-week plan, no fixed event
+export { generateMaintenancePlan } from "./maintenance.js";

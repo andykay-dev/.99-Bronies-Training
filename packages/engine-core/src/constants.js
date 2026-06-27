@@ -23,13 +23,15 @@ export const RACE_DISTANCES = [
 ];
 
 // Training goals — top-level routing between engines.
-//   goal_event → event-engine
-//   healthier  → beginner-engine
-//   hangout    → event-engine (ongoing rolling plan)
+//   goal_event   → event-engine
+//   healthier    → beginner-engine
+//   hangout      → event-engine (ongoing rolling plan)
+//   maintenance  → maintenance engine (rolling 12-week, no fixed event)
 export const TRAINING_GOALS = [
-  { value: "goal_event", label: "Training for an Event",                 desc: "I have a race I'm preparing for",               mult: 1.00 },
-  { value: "healthier",  label: "Get me back to being a Healthy Bronie", desc: "Building habits, getting fitter — no pressure", mult: 0.74 },
-  { value: "hangout",    label: "Coffee With the Boys",                   desc: "Here for the vibes — no pressure",              mult: 0.55 },
+  { value: "goal_event",   label: "Training for an Event",                 desc: "I have a race I'm preparing for",               mult: 1.00 },
+  { value: "healthier",    label: "Get me back to being a Healthy Bronie", desc: "Building habits, getting fitter — no pressure", mult: 0.74 },
+  { value: "hangout",      label: "Coffee With the Boys",                   desc: "Here for the vibes — no pressure",              mult: 0.55 },
+  { value: "maintenance",  label: "Maintenance Mode",                       desc: "Hold your base — rolling 12-week plan, no event target", mult: 0.90 },
 ];
 
 // Day picker — Mon=0 … Sun=6. Monday-anchored throughout.
