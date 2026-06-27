@@ -7747,14 +7747,14 @@ export default function App() {
     // store.get() calls getUid() — avoids a race on fresh sign-ins.
     await new Promise(r => setTimeout(r, 300));
 
-    // Load cloud data first. loadPersistedState already calls setScreen("plan")
-    // when it finds a profile — so if the cloud has data the user goes straight
-    // there without touching onboarding.
+    // Migrate localStorage → Supabase FIRST (non-destructive, won't overwrite cloud).
+    // This ensures a plan built offline/on-device before signing in gets pushed up
+    // before we try to load — otherwise load finds nothing and shows the wrong toast.
+    try { await store.migrateLocalToSupabase(); } catch {}
+
+    // Now load. loadPersistedState calls setScreen("plan") if a profile is found.
     await loadPersistedState();
 
-    // After loading: if a profile was found (hasData will now be true via setProfile),
-    // show a personalised welcome-back toast. If nothing was found, the user is still
-    // on the welcome screen and can start onboarding fresh.
     const cloudCheck = await store.get("bep6_profile");
     if (cloudCheck) {
       let name = "";
@@ -7763,13 +7763,8 @@ export default function App() {
         ? `Welcome back, ${name}! Your plan is loaded ☁`
         : "Your plan is loaded ☁");
     } else {
-      // Genuinely new account — no cloud data exists yet.
-      // Stay on welcome so they go through onboarding.
       showToast("Signed in — build your plan to get started");
     }
-
-    // Migrate any offline localStorage data up to Supabase (non-destructive).
-    try { await store.migrateLocalToSupabase(); } catch {}
   }
 
   // Viewport meta for iPhone — runs once, before any early return
