@@ -107,7 +107,9 @@ import { createClient } from "@supabase/supabase-js";
 //  SUPABASE CLIENT
 // ─────────────────────────────────────────────────────────────
 const SUPABASE_URL  = "https://shsukscaumecqdvrzqsk.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNoc3Vrc2NhdW1lY3FkdnJ6cXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1OTQ2NjQsImV4cCI6MjA5NTE3MDY2NH0.zGRdQgI1GzIaOpZHRH5Mqg77t6p9O0KUkkEkGVR6xY8";
+// New-format publishable key (replaces the disabled legacy anon JWT).
+// Safe to expose in the browser — access is gated by Row Level Security.
+const SUPABASE_ANON = "sb_publishable_DBVxmPpFd1LqduRNL00oLQ_X2ZnKgbu";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ════════════════════════════════════════════════════════════
