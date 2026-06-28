@@ -7698,6 +7698,24 @@ export default function App() {
 
   // Reusable: pull persisted state from the store (Supabase if logged in, else localStorage)
   async function loadPersistedState() {
+    // If signed in but Supabase has no profile yet, push localStorage up first.
+    // Covers: "built plan on this device before signing in" — the most common case.
+    const uid = await getUid();
+    if (uid) {
+      const localProfile = localStorage.getItem(`${slugPrefix(_activeSlug)}bep6_profile`);
+      if (localProfile) {
+        try {
+          const { data: existing } = await supabase
+            .from("app_data").select("key")
+            .eq("user_id", uid).eq("app_id", APP_ID).eq("key", "bep6_profile")
+            .maybeSingle();
+          if (!existing) {
+            try { await store.migrateLocalToSupabase(); } catch {}
+          }
+        } catch {}
+      }
+    }
+
     try {
       const r = await store.get("bep6_profile");
       if (r) {
