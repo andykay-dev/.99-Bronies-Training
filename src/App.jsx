@@ -6650,7 +6650,7 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
 // ─────────────────────────────────────────────────────────────
 //  UI: Welcome screen
 // ─────────────────────────────────────────────────────────────
-function WelcomeScreen({ onStart, onSignIn }) {
+function WelcomeScreen({ onStart, onSignIn, signedIn, noPlanFound }) {
   return (
     <div style={{background:"var(--nav)",minHeight:"calc(100vh - 80px)",padding:"32px var(--pad-x)",
       display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
@@ -6668,29 +6668,47 @@ function WelcomeScreen({ onStart, onSignIn }) {
           .99 TRAINING
         </div>
 
-        {/* Returning user — sign in to load existing plan */}
-        <div style={{background:"rgba(255,200,0,0.12)",border:"2px solid var(--gold)",
-          borderRadius:8,padding:"18px 20px",marginBottom:12,textAlign:"left"}}>
-          <div style={{fontSize:13,fontWeight:700,color:"var(--gold)",
-            marginBottom:4,letterSpacing:.5}}>
-            Already a Bronie?
+        {/* Signed in but no saved plan found — tell the user clearly */}
+        {signedIn && noPlanFound && (
+          <div style={{background:"rgba(30,58,110,0.95)",border:"2px solid var(--gold)",
+            borderRadius:8,padding:"18px 20px",marginBottom:16,textAlign:"left"}}>
+            <div style={{fontSize:15,fontWeight:700,color:"var(--gold)",marginBottom:6,
+              letterSpacing:.5,display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:18}}>👋</span> You're signed in — no saved plan yet
+            </div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,.8)",lineHeight:1.6}}>
+              We couldn't find an existing training plan on your account. That's all
+              good — just build a fresh one below and it'll save automatically and sync
+              to your other devices from now on.
+            </div>
           </div>
-          <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginBottom:12,lineHeight:1.5}}>
-            Sign in to load your existing plan on this device.
+        )}
+
+        {/* Returning user — sign in to load existing plan (hidden once we know there's no plan) */}
+        {!(signedIn && noPlanFound) && (
+          <div style={{background:"rgba(255,200,0,0.12)",border:"2px solid var(--gold)",
+            borderRadius:8,padding:"18px 20px",marginBottom:12,textAlign:"left"}}>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--gold)",
+              marginBottom:4,letterSpacing:.5}}>
+              Already a Bronie?
+            </div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginBottom:12,lineHeight:1.5}}>
+              Sign in to load your existing plan on this device.
+            </div>
+            <button onClick={onSignIn} className="btn btn-p"
+              style={{width:"100%",padding:12,fontSize:14,letterSpacing:.5,
+                background:"var(--gold)",color:"#1A3060",border:"none",fontWeight:700}}>
+              ☁ Load my profile →
+            </button>
           </div>
-          <button onClick={onSignIn} className="btn btn-p"
-            style={{width:"100%",padding:12,fontSize:14,letterSpacing:.5,
-              background:"var(--gold)",color:"#1A3060",border:"none",fontWeight:700}}>
-            ☁ Load my profile →
-          </button>
-        </div>
+        )}
 
         {/* New user — build a fresh plan */}
         <div style={{background:"rgba(30,58,110,0.85)",border:"2px solid rgba(160,200,240,0.5)",
           borderRadius:8,padding:"24px 20px",marginBottom:16,textAlign:"left"}}>
           <div style={{fontFamily:"var(--sans)",fontSize:18,fontWeight:700,color:"white",
             marginBottom:4,letterSpacing:.5,textAlign:"center"}}>
-            NEW? BUILD YOUR TRAINING PLAN
+            {signedIn && noPlanFound ? "BUILD YOUR TRAINING PLAN" : "NEW? BUILD YOUR TRAINING PLAN"}
           </div>
           <div style={{fontSize:13,color:"var(--gold)",marginBottom:20,fontStyle:"italic",textAlign:"center"}}>
             A few quick questions and you're running
@@ -7649,6 +7667,7 @@ export default function App() {
   const [feedbackOpen,     setFeedbackOpen]     = useState(false); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
   const [planRebuildMsg,   setPlanRebuildMsg]   = useState("");   // banner shown after plan rebuild
   const [showWhatsNext,    setShowWhatsNext]    = useState(false); // post-race "What's next?" modal
+  const [noPlanFound,      setNoPlanFound]      = useState(false); // signed in but no saved plan located
   const [skin,           setSkinState]      = useState("default"); // "default" | "8bit"
   const [racePlan,       setRacePlanState]  = useState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
   const [nutritionLib,   setNutritionLib]   = useState([]); // persisted personal nutrition library
@@ -7730,7 +7749,14 @@ export default function App() {
           try { await store.set("bep6_profile", JSON.stringify(loaded)); } catch {}
         }
         setProfile(loaded);
+        setNoPlanFound(false);
         setScreen("plan");
+      } else {
+        // No saved profile anywhere (cloud or local). If the user is signed in,
+        // flag it so the welcome screen can tell them clearly rather than showing
+        // a generic landing page.
+        const uid = await getUid();
+        if (uid) setNoPlanFound(true);
       }
     } catch {}
     try { const r = await store.get("bep6_event");   if (r) setEvent(JSON.parse(r.value));   } catch {}
@@ -8117,6 +8143,8 @@ export default function App() {
           <WelcomeScreen
             onStart={() => setScreen("onboarding")}
             onSignIn={() => setShowAuth(true)}
+            signedIn={authed}
+            noPlanFound={noPlanFound}
           />
         )}
 
