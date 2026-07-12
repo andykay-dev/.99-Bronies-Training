@@ -1171,7 +1171,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
   return (
     <div className="card" style={{marginBottom:8,overflow:"hidden",opacity:isRest?0.55:isPast?0.5:1,
       position:"relative",
-      background: isToday ? "#E8F5E9" : undefined,
+      background: isToday ? "rgba(0,240,255,0.10)" : undefined,
       border: isToday ? "2px solid #4CAF50" : undefined,
       boxShadow: isToday ? "3px 3px 0 #81C784" : undefined}}>
       <div style={{display:"flex"}}>
@@ -1252,7 +1252,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                         title={`Change to ${m.label}`}
                         style={{padding:"5px 8px",fontSize:11,fontWeight:600,
                           borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                          background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                          background:"var(--white)",cursor:"pointer",color:"var(--ink3)"}}>
                         {m.icon} {m.label}
                       </button>
                     ))}
@@ -1288,7 +1288,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                                 }}
                                 style={{padding:"5px 8px",fontSize:11,fontWeight:600,
                                   borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                                  background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                                  background:"var(--white)",cursor:"pointer",color:"var(--ink3)"}}>
                                 ↕ {DAYS.find(x=>x.id===d.id)?.short}: {ws.label}
                               </button>
                             );
@@ -1325,7 +1325,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                             onClick={() => onDaySlotChange(dayId, m.key)}
                             style={{padding:"5px 8px",fontSize:11,fontWeight:600,
                               borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                              background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                              background:"var(--white)",cursor:"pointer",color:"var(--ink3)"}}>
                             {m.icon} {m.label}
                           </button>
                         ))}
@@ -1418,7 +1418,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                                   onClick={() => onDaySlotChange(dayId, k)}
                                   style={{padding:"6px 10px",fontSize:11,fontWeight:600,cursor:"pointer",
                                     borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                                    background:"white",color:"var(--ink3)",transition:"all .15s"}}>
+                                    background:"var(--white)",color:"var(--ink3)",transition:"all .15s"}}>
                                   {m.icon} {m.label}
                                 </button>
                               );
@@ -1444,7 +1444,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                                   title={`Change to ${m.label}`}
                                   style={{padding:"5px 8px",fontSize:11,fontWeight:600,
                                     borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                                    background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                                    background:"var(--white)",cursor:"pointer",color:"var(--ink3)"}}>
                                   {m.icon} {m.label}
                                 </button>
                               ))}
@@ -1482,7 +1482,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                                       onClick={() => onDaySlotChange(dayId, m.key)}
                                       style={{padding:"5px 8px",fontSize:11,fontWeight:600,
                                         borderRadius:"var(--r)",border:"1px solid var(--rule)",
-                                        background:"white",cursor:"pointer",color:"var(--ink3)"}}>
+                                        background:"var(--white)",cursor:"pointer",color:"var(--ink3)"}}>
                                       {m.icon} {m.label}
                                     </button>
                                   ))}
@@ -1589,7 +1589,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                           disabled={(draftReps ?? editableInfo.reps) <= editableInfo.min}
                           style={{width:38,height:38,fontSize:18,fontWeight:700,
                             border:"2px solid var(--rule)",borderRadius:"var(--r)",
-                            background:"white",cursor:(draftReps ?? editableInfo.reps) <= editableInfo.min ? "not-allowed" : "pointer",
+                            background:"var(--white)",cursor:(draftReps ?? editableInfo.reps) <= editableInfo.min ? "not-allowed" : "pointer",
                             color:"var(--ink)",opacity:(draftReps ?? editableInfo.reps) <= editableInfo.min ? 0.4 : 1}}>
                           −
                         </button>
@@ -1602,7 +1602,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                           disabled={(draftReps ?? editableInfo.reps) >= editableInfo.max}
                           style={{width:38,height:38,fontSize:18,fontWeight:700,
                             border:"2px solid var(--rule)",borderRadius:"var(--r)",
-                            background:"white",cursor:(draftReps ?? editableInfo.reps) >= editableInfo.max ? "not-allowed" : "pointer",
+                            background:"var(--white)",cursor:(draftReps ?? editableInfo.reps) >= editableInfo.max ? "not-allowed" : "pointer",
                             color:"var(--ink)",opacity:(draftReps ?? editableInfo.reps) >= editableInfo.max ? 0.4 : 1}}>
                           +
                         </button>
@@ -1706,7 +1706,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:200,
         display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
-      <div style={{background:"#fff",borderRadius:"12px 12px 0 0",width:"100%",
+      <div style={{background:"var(--white)",borderRadius:"12px 12px 0 0",width:"100%",
           maxWidth:560,maxHeight:"92vh",overflowY:"auto",padding:"16px var(--pad-x) 40px",
           position:"relative"}}
         onClick={e => e.stopPropagation()}>
@@ -1715,7 +1715,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
         <button onClick={onClose}
           style={{position:"sticky",top:0,float:"right",zIndex:10,
             width:32,height:32,borderRadius:"50%",border:"2px solid var(--rule)",
-            background:"white",cursor:"pointer",fontSize:14,fontWeight:700,
+            background:"var(--white)",cursor:"pointer",fontSize:14,fontWeight:700,
             color:"var(--ink3)",display:"flex",alignItems:"center",justifyContent:"center",
             boxShadow:"0 2px 8px rgba(0,0,0,0.15)",marginBottom:-32,marginLeft:"auto"}}>
           ✕
@@ -1743,7 +1743,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
           </div>
         </div>
         {week.note && (
-          <div style={{background:"#E8F5E9",border:"1px solid #4CAF50",
+          <div style={{background:"rgba(0,240,255,0.10)",border:"1px solid #4CAF50",
             borderRadius:"var(--r)",padding:"8px 12px",fontSize:12,color:"#2E7D32",
             marginBottom:12,lineHeight:1.5}}>{week.note}</div>
         )}
@@ -2084,13 +2084,13 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
             <div key={i} id={isCurrent ? "current-week-row" : undefined}
               onClick={() => onSelectWeek(i)}
               style={{borderBottom:"1px solid var(--rule)",cursor:"pointer",
-                background:isCurrent?"#EEF6FF":isRace?"var(--accent-light)":"white",
+                background:isCurrent?"rgba(0,240,255,0.08)":isRace?"var(--accent-light)":"white",
                 transition:"background .1s",
                 borderLeft: isCurrent ? "4px solid var(--accent)" : "4px solid transparent",
                 opacity: isPast ? 0.55 : 1,
               }}
-              onMouseEnter={e => !isRace && (e.currentTarget.style.background = isCurrent?"#E0EFFF":"var(--bg)")}
-              onMouseLeave={e => !isRace && (e.currentTarget.style.background = isCurrent?"#EEF6FF":"white")}>
+              onMouseEnter={e => !isRace && (e.currentTarget.style.background = isCurrent?"rgba(0,240,255,0.12)":"var(--bg)")}
+              onMouseLeave={e => !isRace && (e.currentTarget.style.background = isCurrent?"rgba(0,240,255,0.08)":"white")}>
               <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px var(--pad-x) 4px"}}>
                 <div style={{width:30,height:30,borderRadius:"50%",flexShrink:0,
                   background:isCurrent?"var(--accent)":isRace?"#FFD0D8":w.isPeakLong?"var(--gold-pale)":w.isDown?"#E8F4FF":"#fff",
@@ -2184,7 +2184,7 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
                         <span style={{
                           fontSize:11,color:today?"#2E7D32":slotColor,fontWeight:700,
                           flexShrink:0,minWidth:28,
-                          background: today ? "#E8F5E9" : "transparent",
+                          background: today ? "rgba(0,240,255,0.10)" : "transparent",
                           padding: today ? "1px 4px" : undefined,
                           borderRadius: today ? 4 : undefined,
                           textDecoration: past && cv === "nup_soft" ? "line-through" : "none",
@@ -2257,7 +2257,7 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
                         onClick={() => onFeedback(w.weekNum, o.val)}
                         style={{padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",
                           borderRadius:12,border:"1.5px solid var(--rule)",
-                          background:"white",color:"var(--ink3)",transition:"all .12s"}}>
+                          background:"var(--white)",color:"var(--ink3)",transition:"all .12s"}}>
                         {o.label}
                       </button>
                     ))}
@@ -2325,7 +2325,7 @@ function DayPlanPicker({ value, onChange }) {
 
         return (
           <div key={d.id} style={{border:"1px solid var(--rule)",borderRadius:"var(--r)",
-            background:"white",overflow:"hidden"}}>
+            background:"var(--white)",overflow:"hidden"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px"}}>
               <div style={{width:50,fontSize:12,fontWeight:700,color:"var(--ink3)",
                 letterSpacing:.8,flexShrink:0}}>{d.short}</div>
@@ -3167,14 +3167,14 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
             {TRAINING_GOALS.map(g => (
               <div key={g.value} onClick={() => up("trainingGoal", g.value)}
                 style={{display:"flex",alignItems:"center",gap:14,padding:"16px 18px",cursor:"pointer",
-                  background: data.trainingGoal===g.value ? "#E8F5E9" : "white",
+                  background: data.trainingGoal===g.value ? "rgba(0,240,255,0.10)" : "white",
                   border:`2px solid ${data.trainingGoal===g.value ? "var(--accent)" : "var(--rule)"}`,
                   borderRadius:"var(--r)",transition:"all .15s"}}>
                 <div style={{width:20,height:20,borderRadius:"50%",flexShrink:0,
                   border:`2px solid ${data.trainingGoal===g.value ? "var(--accent)" : "var(--rule)"}`,
                   background: data.trainingGoal===g.value ? "var(--accent)" : "white",
                   display:"flex",alignItems:"center",justifyContent:"center"}}>
-                  {data.trainingGoal===g.value && <div style={{width:8,height:8,borderRadius:"50%",background:"white"}}/>}
+                  {data.trainingGoal===g.value && <div style={{width:8,height:8,borderRadius:"50%",background:"var(--white)"}}/>}
                 </div>
                 <div>
                   <div style={{fontSize:16,fontWeight:700,color:"var(--ink)"}}>{g.label}</div>
@@ -3466,7 +3466,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
               return (
                 <>
                   {isTooFast && (
-                    <div style={{padding:"12px 14px",background:"#FFF0E0",
+                    <div style={{padding:"12px 14px",background:"rgba(241,196,15,0.12)",
                       borderLeft:"3px solid #E07A00",borderRadius:"var(--r)",marginBottom:8}}>
                       <div style={{fontSize:12,fontWeight:700,color:"#C06000",marginBottom:6}}>
                         ⏳ This one's going to take a little more time
@@ -3486,7 +3486,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                       </div>
                     </div>
                   )}
-                  <div style={{padding:"12px 14px",background:"#E8F5E9",
+                  <div style={{padding:"12px 14px",background:"rgba(0,240,255,0.10)",
                     borderLeft:`3px solid ${isTooFast ? "#E07A00" : "#2E7D32"}`,borderRadius:"var(--r)"}}>
                     <div style={{fontSize:12,fontWeight:700,color: isTooFast ? "#C06000" : "#2E7D32",marginBottom:6}}>
                       Your plan at a glance
@@ -3724,7 +3724,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                 goalTime: data.event?.goalTime,
               });
               return (
-                <div style={{padding:"12px 14px",background:"#E8F5E9",
+                <div style={{padding:"12px 14px",background:"rgba(0,240,255,0.10)",
                   border:"1px solid #4CAF50",borderRadius:"var(--r)"}}>
                   <div style={{fontSize:11,fontWeight:700,color:"#2E7D32",letterSpacing:.8,
                     textTransform:"uppercase",marginBottom:8}}>Your training paces</div>
@@ -3735,7 +3735,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                       {label:"Intervals", pace:p.ip},
                       {label:"Warm Up",   pace:p.wucd},
                     ].map(({label, pace}) => (
-                      <div key={label} style={{background:"white",borderRadius:"var(--r)",padding:"8px 10px"}}>
+                      <div key={label} style={{background:"var(--white)",borderRadius:"var(--r)",padding:"8px 10px"}}>
                         <div style={{fontSize:10,color:"var(--ink3)",fontWeight:600,textTransform:"uppercase"}}>{label}</div>
                         <div style={{fontFamily:"var(--mono)",fontSize:15,fontWeight:700,color:"#2E7D32"}}>
                           {fmtPace(pace)}<span style={{fontSize:10,fontWeight:400,color:"var(--ink3)"}}>/km</span>
@@ -4492,8 +4492,8 @@ function AppleWatchStepRow({ step, indented = false }) {
     warmup:   { label:"Warmup",   bg:"#E3F2FD", color:"#1565C0" },
     cooldown: { label:"Cooldown", bg:"#E3F2FD", color:"#1565C0" },
     interval: { label:"Work",     bg:"#FCE4EC", color:"#C62828" },
-    recovery: { label:"Recovery", bg:"#E8F5E9", color:"#2E7D32" },
-    rest:     { label:"Recovery", bg:"#E8F5E9", color:"#2E7D32" },
+    recovery: { label:"Recovery", bg:"rgba(0,240,255,0.10)", color:"#2E7D32" },
+    rest:     { label:"Recovery", bg:"rgba(0,240,255,0.10)", color:"#2E7D32" },
   };
   const t = TYPE[kind] || TYPE.interval;
 
@@ -4889,7 +4889,7 @@ function WorkoutCreatorScreen({ onBack }) {
                       <div key={i}>
                         {/* Repeat header */}
                         <div style={{ padding:"8px 14px",
-                          background:"#FFF8E1", borderBottom:"1px solid #F0E0A0",
+                          background:"rgba(241,196,15,0.10)", borderBottom:"1px solid #F0E0A0",
                           display:"flex", alignItems:"center", gap:8 }}>
                           <span style={{ fontSize:11, fontWeight:700,
                             color:"#B8860B", fontFamily:"var(--mono)" }}>
@@ -6640,7 +6640,7 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
 
                 {/* Drink mix note */}
                 {leg.drinkMixNote && (
-                  <div style={{ padding:"7px 14px", background:"#EAF6FF",
+                  <div style={{ padding:"7px 14px", background:"rgba(0,240,255,0.08)",
                     borderBottom:"1px solid #BBDEFB",
                     display:"flex", alignItems:"center", gap:8 }}>
                     <span style={{ fontSize:13, flexShrink:0 }}>💧</span>
@@ -7099,7 +7099,7 @@ function ConfirmDialog({ open, title, message, confirmLabel, cancelLabel, danger
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,
       display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
       onClick={onCancel}>
-      <div style={{background:"white",borderRadius:"var(--r)",maxWidth:380,width:"100%",
+      <div style={{background:"var(--white)",borderRadius:"var(--r)",maxWidth:380,width:"100%",
         padding:"22px 22px 18px"}} onClick={e => e.stopPropagation()}>
         <div style={{fontFamily:"var(--display)",fontSize:22,letterSpacing:1,marginBottom:8}}>
           {title || "Are you sure?"}
@@ -8534,7 +8534,7 @@ export default function App() {
             {/* Plan rebuild notification */}
             {planRebuildMsg && (
               <div style={{margin:"8px var(--pad-x) 0",padding:"10px 14px",
-                borderRadius:"var(--r)",background:"#E8F5E9",color:"#1a472a",
+                borderRadius:"var(--r)",background:"rgba(0,240,255,0.10)",color:"#1a472a",
                 fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:8,
                 border:"1px solid #a5d6a7"}}>
                 ✓ {planRebuildMsg}
@@ -8546,7 +8546,7 @@ export default function App() {
               <>
                 {event?.name ? (
                   <div style={{padding:"14px var(--pad-x)",borderBottom:"1px solid var(--rule)",
-                    display:"flex",gap:12,alignItems:"center",background:"white"}}>
+                    display:"flex",gap:12,alignItems:"center",background:"var(--white)"}}>
                     <div style={{flex:1}}>
                       <div style={{fontSize:11,fontWeight:600,color:"var(--ink3)",letterSpacing:.8,
                         textTransform:"uppercase",marginBottom:2,fontStyle:"italic"}}>
@@ -8559,7 +8559,7 @@ export default function App() {
                       </div>
                     </div>
                     {daysTo !== null && (
-                      <div style={{textAlign:"center",background:"#E8F5E9",
+                      <div style={{textAlign:"center",background:"rgba(0,240,255,0.10)",
                         borderRadius:"var(--r)",padding:"10px 14px",flexShrink:0}}>
                         <div style={{fontFamily:"var(--mono)",fontSize:28,fontWeight:700,color:"var(--accent)",lineHeight:1}}>{daysTo}</div>
                         <div style={{fontSize:10,color:"#2E7D32",fontWeight:600,
@@ -8568,7 +8568,7 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  <div style={{padding:"20px var(--pad-x)",background:"white",borderBottom:"1px solid var(--rule)"}}>
+                  <div style={{padding:"20px var(--pad-x)",background:"var(--white)",borderBottom:"1px solid var(--rule)"}}>
                     {profile.trainingGoal === "healthier" ? (
                       <>
                         <div style={{fontFamily:"var(--display)",fontSize:22,letterSpacing:1,marginBottom:4}}>
@@ -8791,7 +8791,7 @@ export default function App() {
               ))}
             </div>
             <div className="card card-l" style={{padding:16,marginBottom:16,
-              background:"#E8F5E9",borderColor:"#4CAF50"}}>
+              background:"rgba(0,240,255,0.10)",borderColor:"#4CAF50"}}>
               <div style={{fontFamily:"var(--display)",fontSize:22,letterSpacing:1}}>{profile.name || "Anonymous Bronie"}</div>
               {profile.nickname && <div style={{fontSize:14,color:"var(--ink3)",fontStyle:"italic"}}>"{profile.nickname}"</div>}
               <div style={{fontSize:12,color:"#2E7D32",marginTop:6,fontStyle:"italic"}}>
@@ -8949,7 +8949,7 @@ export default function App() {
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:400,
           display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={() => setShowWhatsNext(false)}>
-          <div style={{background:"white",borderRadius:"var(--r) var(--r) 0 0",
+          <div style={{background:"var(--white)",borderRadius:"var(--r) var(--r) 0 0",
             width:"100%",maxWidth:560,padding:"28px var(--pad-x) 40px"}}
             onClick={e => e.stopPropagation()}>
             <div style={{fontFamily:"var(--display)",fontSize:28,letterSpacing:1,marginBottom:8}}>
