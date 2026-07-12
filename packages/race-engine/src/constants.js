@@ -21,11 +21,10 @@ export const FLASK_ML = 500;
  *       "drink_mix" = powder/liquid added to a flask at aid-station fill-ups
  */
 export const FUEL_LOOKUP = {
-  "Maurten Gel 100":           { carbs: 25, type: "solid" },
-  "Koda Energy Gel":           { carbs: 30, type: "solid" },
-  "SIS Beta Fuel Gel":         { carbs: 40, type: "solid" },
-  "Energy Chews (Per Packet)": { carbs: 32, type: "solid" },
-  "Tailwind 500ml Flask":      { carbs: 50, type: "drink_mix" },
+  "Gel":                  { carbs: 27, type: "solid" },
+  "Energy Chew":          { carbs: 24, type: "solid" },
+  "Energy / Muesli Bar":  { carbs: 25, type: "solid" },
+  "Drink Mix":            { carbs: 50, type: "drink_mix" },
 };
 
 /**

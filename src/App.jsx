@@ -135,7 +135,7 @@ const HORSE_FOOTER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYA
 
 // Skin cycle order — add new skins here to make them available in rotation.
 // "surprise" skins will be added here when ready.
-const SKINS = ["default", "8bit", "dark"];
+const SKINS = ["dark", "light"];
 
 function loadPixelFont() {
   if (document.getElementById("pixel-font-link")) return;
@@ -172,6 +172,52 @@ const G = ({ skin }) => {
       }
       @media (min-width: 480px){
         :root{ --pad-x:16px; --pad-x-tight:14px; }
+      }
+
+      /* ══ DARK THEME (Neon) — volt lime / hot pink / cyan on near-black ══ */
+      body[data-skin="dark"]{
+        --ink:#FFFFFF; --ink2:#E0E0E0; --ink3:#A0A0A0; --ink4:#6E6E6E;
+        --rule:rgba(255,255,255,0.12); --bg:#121212; --white:#1E1E1E; --black:#000000;
+        --accent:#FF007F; --accent-light:rgba(255,0,127,0.12);
+        --warn:#FF007F; --yellow:#CCFF00; --blue:#00E5FF;
+        --hud:#0A0A0A; --nav:#1A1A1A; --navtab:#242424;
+        --gold:#CCFF00; --gold-dark:#A5CC00; --gold-pale:rgba(204,255,0,0.15);
+        --card-shadow:0 4px 16px rgba(0,0,0,0.5);
+        background:#121212;
+      }
+      body[data-skin="dark"]{ color:#FFFFFF; }
+      body[data-skin="dark"] .card,
+      body[data-skin="dark"] [class*="card"]{
+        background:#1E1E1E; border-color:rgba(255,255,255,0.1);
+      }
+      body[data-skin="dark"] .btn-p{
+        background:#CCFF00; color:#000; box-shadow:0 0 12px rgba(204,255,0,0.35); border:none;
+      }
+      body[data-skin="dark"] input,
+      body[data-skin="dark"] select,
+      body[data-skin="dark"] textarea{
+        background:#1E1E1E; color:#fff; border-color:rgba(255,255,255,0.15);
+      }
+      body[data-skin="dark"] select option{ background:#1E1E1E; color:#fff; }
+
+      /* ══ LIGHT THEME (Alpine) — deep green / flare orange / sky blue on off-white ══ */
+      body[data-skin="light"]{
+        --ink:#1A1A1A; --ink2:#0F4C43; --ink3:#637381; --ink4:#8B98A5;
+        --rule:#E2E8EC; --bg:#F4F6F8; --white:#FFFFFF; --black:#0F4C43;
+        --accent:#FF6B35; --accent-light:#FFF0EA;
+        --warn:#FF6B35; --yellow:#0F4C43; --blue:#4A90E2;
+        --hud:#0F4C43; --nav:#0F4C43; --navtab:#166054;
+        --gold:#F5C800; --gold-dark:#C49A00; --gold-pale:#FFF5B0;
+        --card-shadow:0 8px 24px rgba(15,76,67,0.08);
+        background:#F4F6F8;
+      }
+      body[data-skin="light"]{ color:#1A1A1A; }
+      body[data-skin="light"] .card,
+      body[data-skin="light"] [class*="card"]{
+        background:#FFFFFF; border-color:#E2E8EC;
+      }
+      body[data-skin="light"] .btn-p{
+        background:#0F4C43; color:#fff; border:none;
       }
 
       /* ── 8-bit skin overrides — applied when <body data-skin="8bit"> ── */
@@ -1934,15 +1980,15 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
             </>
           ) : (
             <>
-              <div style={{textAlign:"center",minWidth:54}}>
-                <div style={{fontSize:26,fontWeight:800,lineHeight:1,fontFamily:"var(--mono)"}}>{Math.ceil(countdown.daysOut / 7)}</div>
-                <div style={{fontSize:9,fontWeight:700,letterSpacing:1,textTransform:"uppercase",opacity:.8,marginTop:2}}>week{Math.ceil(countdown.daysOut / 7)===1?"":"s"} to go</div>
+              <div style={{textAlign:"center",minWidth:48}}>
+                <div style={{fontSize:30,fontWeight:800,lineHeight:1,fontFamily:"var(--mono)"}}>{Math.ceil(countdown.daysOut / 7)}</div>
               </div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Next event</div>
-                <div style={{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{countdown.eventName}</div>
-                <div style={{fontSize:11,opacity:.85,marginTop:1}}>
-                  {countdown.daysOut} day{countdown.daysOut===1?"":"s"} away
+                <div style={{fontSize:15,fontWeight:800,letterSpacing:.5,textTransform:"uppercase"}}>
+                  {Math.ceil(countdown.daysOut / 7)} week{Math.ceil(countdown.daysOut / 7)===1?"":"s"} to go
+                </div>
+                <div style={{fontSize:12,fontWeight:600,opacity:.75,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}}>
+                  {countdown.eventName}
                 </div>
               </div>
               {onNav && <div style={{fontSize:16,opacity:.5}}>›</div>}
@@ -6161,7 +6207,7 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
             </div>
             <div style={{ gridColumn:"1 / -1" }}>
               <label className="lbl">Aid station stock</label>
-              <input className="inp" placeholder="e.g. Water, Tailwind, bananas"
+              <input className="inp" placeholder="e.g. Water, drink mix, bananas"
                 value={leg.stock || ""}
                 onChange={e => updateLeg(i, { stock: e.target.value })} />
             </div>
@@ -6813,21 +6859,17 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
 }
 
 function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, onLogout, onSignIn }) {
-  const is8bit = skin === "8bit";
+  const is8bit = false; // legacy skin removed
   const isDark  = skin === "dark";
 
-  // Cycle to the next skin in the SKINS array
+  // Toggle between the two themes: dark (neon) and light (alpine)
   function cycleSkin() {
-    const idx  = SKINS.indexOf(skin);
-    const next = SKINS[(idx + 1) % SKINS.length];
-    setSkin(next);
+    setSkin(isDark ? "light" : "dark");
   }
 
-  // Button label: show next skin name so user knows what they'll get
-  const skinLabels = { default:"Default", "8bit":"8-Bit", dark:"Dark" };
-  const skinIcons  = { default:"🎨", "8bit":"🕹", dark:"⚡" };
-  const skinLabel  = skinLabels[skin] || skin;
-  const skinIcon   = skinIcons[skin]  || "🎨";
+  // Button shows the theme you'll switch TO
+  const skinLabel  = isDark ? "Light" : "Dark";
+  const skinIcon   = isDark ? "☀️" : "🌙";
   return (
     <div style={{position:"sticky",top:0,zIndex:100}}>
       <div style={{background:"var(--hud)",padding:"4px var(--pad-x)",
@@ -6876,22 +6918,22 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
           onClick={cycleSkin}
           title={`Current: ${skinLabel} — click to cycle skins`}
           style={{
-            background: is8bit ? "#ffd700" : isDark ? "rgba(57,255,154,0.1)" : "rgba(255,255,255,0.12)",
-            border: is8bit ? "2px solid #b8960c" : isDark ? "1px solid #39FF9A" : "2px solid rgba(255,255,255,0.25)",
-            borderRadius: is8bit ? 0 : 8,
-            color: is8bit ? "#0a0a1a" : isDark ? "#39FF9A" : "#fff",
-            fontSize: is8bit ? 9 : 11,
+            background: "rgba(255,255,255,0.12)",
+            border: "1.5px solid rgba(255,255,255,0.3)",
+            borderRadius: 8,
+            color: "#fff",
+            fontSize: 11,
             fontWeight: 700,
-            padding: "5px 10px",
+            padding: "5px 12px",
             cursor: "pointer",
-            letterSpacing: is8bit ? 1 : 0.3,
-            fontFamily: is8bit ? "'Press Start 2P',monospace" : "var(--sans)",
-            boxShadow: is8bit ? "2px 2px 0 #b8960c" : "none",
+            letterSpacing: 0.3,
+            fontFamily: "var(--sans)",
+            boxShadow: "none",
             transition: "all .2s",
             flexShrink: 0,
             lineHeight: 1.4,
           }}>
-          {skinIcon} {is8bit ? "SKINS" : "Skins"}
+          {skinIcon} {skinLabel}
         </button>
 
         <div style={{textAlign:"right"}}>
@@ -8034,7 +8076,7 @@ export default function App() {
   const [planRebuildMsg,   setPlanRebuildMsg]   = useState("");   // banner shown after plan rebuild
   const [showWhatsNext,    setShowWhatsNext]    = useState(false); // post-race "What's next?" modal
   const [noPlanFound,      setNoPlanFound]      = useState(false); // signed in but no saved plan located
-  const [skin,           setSkinState]      = useState("default"); // "default" | "8bit"
+  const [skin,           setSkinState]      = useState("dark"); // "dark" (neon) | "light" (alpine)
   const [racePlan,       setRacePlanState]  = useState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
   const [nutritionLib,   setNutritionLib]   = useState([]); // persisted personal nutrition library
 
@@ -8044,6 +8086,14 @@ export default function App() {
     document.body.setAttribute("data-skin", s);
     try { await store.set("bep6_skin", s); } catch {}
   }
+
+  // Ensure the body always carries a valid theme. Defaults to dark (neon) and
+  // migrates any legacy skin names (default/8bit) to the two current themes.
+  useEffect(() => {
+    const valid = skin === "light" ? "light" : "dark";
+    if (valid !== skin) { setSkinState(valid); }
+    document.body.setAttribute("data-skin", valid);
+  }, [skin]);
 
   // ── Auth: check existing session on mount ──────────────────
   useEffect(() => {
@@ -8133,8 +8183,9 @@ export default function App() {
     try {
       const r = await store.get("bep6_skin");
       if (r) {
-        setSkinState(r.value);
-        document.body.setAttribute("data-skin", r.value);
+        const migrated = r.value === "light" ? "light" : "dark";
+        setSkinState(migrated);
+        document.body.setAttribute("data-skin", migrated);
       }
     } catch {}
     try { const r = await store.get("bep6_racePlan");      if (r) setRacePlanState(JSON.parse(r.value)); } catch {}
