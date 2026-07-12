@@ -5,11 +5,10 @@ import React, { useState, useEffect } from "react";
 // ─────────────────────────────────────────────────────────────
 import {
   parseTime, fmtPace, fmtDuration, fmtDate, parseLocalDate,
-  weeksBetween, mondayOf, dateFromAnchor, dateFromToday,
-  weekStatus, dayDate, goalMult, to99, derivePaces,
-  longRunCap, estimateLongRunTime, elevationGuide, bucketElevation,
+  weekStatus, dayDate, derivePaces,
+  elevationGuide, bucketElevation,
   DAYS, PHASES, RACE_DISTANCES, TRAINING_GOALS,
-  SLOT_TYPES, computeFeedbackAdj,
+  SLOT_TYPES,
   generateMaintenancePlan,
 } from "@bronies/engine-core";
 
@@ -17,7 +16,6 @@ import {
   generatePlan, buildSlot,
   normaliseSlot, primarySlot, hasStrength, isWorkoutSlot,
   parseEditableSession, regenerateFromReps, makeW,
-  getPhase, peakLongRunWeeks,
   DEFAULT_DAY_PLAN, DEFAULT_WORKOUT_MINUTES, WORKOUT_SUBTYPES, PRIORITY,
 } from "@bronies/event-engine";
 
@@ -127,33 +125,18 @@ const HORSE_FOOTER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYA
 //  STYLES
 // ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
-//  Theme / skin system
-//  G({ skin }) injects global styles. The default theme is always
-//  loaded. The 8-bit overrides are layered on top via [data-skin="8bit"]
-//  on <body>. Press Start 2P font is lazy-loaded only when needed.
+//  Theme
+//  G() injects the app's single global theme (Arcade). The `skin`
+//  prop is still threaded through from top-level state for now —
+//  see the `skin`/`setSkin` state in the root component — but no
+//  longer changes anything here.
 // ─────────────────────────────────────────────────────────────
 
-// Skin cycle order — add new skins here to make them available in rotation.
-// "surprise" skins will be added here when ready.
-const SKINS = ["dark", "light"];
-
-function loadPixelFont() {
-  if (document.getElementById("pixel-font-link")) return;
-  const link = document.createElement("link");
-  link.id   = "pixel-font-link";
-  link.rel  = "stylesheet";
-  link.href = "https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap";
-  document.head.appendChild(link);
-}
-
-const G = ({ skin }) => {
-  // Lazy-load pixel font only when 8-bit skin is active
-  if (skin === "8bit") loadPixelFont();
-
+const G = () => {
   return (
     <style>{`
       /* ── Default fonts (always loaded) ── */
-      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&family=Caveat:wght@600&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&family=Caveat:wght@600&display=swap');
 
       *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 
@@ -201,91 +184,6 @@ const G = ({ skin }) => {
       /* Numbers/data in mono for that scoreboard feel */
       .data-metric{ font-family:var(--mono); color:var(--yellow); }
 
-      /* ── 8-bit skin overrides — applied when <body data-skin="8bit"> ── */
-      body[data-skin="8bit"]{
-        --ink:#ffd700; --ink2:#a0c8f0; --ink3:#7090b0; --ink4:#445566;
-        --rule:#1a3a6e; --bg:#050510; --white:#0a0a1a; --black:#ffd700;
-        --accent:#e63946; --accent-light:#3a0010;
-        --warn:#ff6b6b; --yellow:#ffd700; --blue:#2e5fa3;
-        --hud:#0a0a1a; --nav:#1a3a6e; --navtab:#0a2050;
-        --gold:#ffd700; --gold-dark:#b8960c; --gold-pale:#2a2000;
-        --card-shadow:4px 4px 0 #1a3a6e;
-        /* Use Press Start 2P only for display/headings via --display.
-           Body/UI uses a system mono so it stays readable and doesn't overflow. */
-        --sans:ui-monospace,'Courier New',monospace;
-        --mono:'VT323',monospace;
-        --display:'Press Start 2P',monospace;
-        --handwrite:'VT323',monospace;
-        --r:0px; --pad-x:10px; --pad-x-tight:8px;
-        background-image:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px);
-        image-rendering:pixelated;
-        font-size:11px;
-        overflow-x:hidden;
-      }
-
-      /* Only headings/display elements get Press Start 2P */
-      body[data-skin="8bit"] [style*="var(--display)"],
-      body[data-skin="8bit"] .display-font {
-        font-family:'Press Start 2P',monospace;
-        word-break:break-word;
-        overflow-wrap:break-word;
-      }
-
-      @media (min-width: 480px){
-        body[data-skin="8bit"]{ --pad-x:12px; --pad-x-tight:10px; font-size:12px; }
-      }
-
-      /* ── 8-bit extra styles ── */
-      body[data-skin="8bit"] input,
-      body[data-skin="8bit"] select,
-      body[data-skin="8bit"] textarea { font-family:ui-monospace,'Courier New',monospace; font-size:11px; }
-      body[data-skin="8bit"] button { font-size:9px; }
-
-      /* CRT scanline overlay — 8bit only */
-      body[data-skin="8bit"]::after{
-        content:'';position:fixed;top:0;left:0;right:0;bottom:0;
-        background:linear-gradient(transparent 50%,rgba(0,0,0,0.04) 50%);
-        background-size:100% 4px;pointer-events:none;z-index:9999;
-      }
-
-      /* 8-bit range slider */
-      body[data-skin="8bit"] input[type=range]{
-        -webkit-appearance:none;appearance:none;height:8px;
-        background:repeating-linear-gradient(90deg,#1a3a6e 0,#1a3a6e 4px,#050510 4px,#050510 8px);
-        outline:none;border:2px solid #1a3a6e;cursor:pointer;
-      }
-      body[data-skin="8bit"] input[type=range]::-webkit-slider-thumb{
-        -webkit-appearance:none;appearance:none;width:16px;height:20px;
-        background:#ffd700;border:2px solid #b8960c;cursor:pointer;box-shadow:2px 2px 0 #b8960c;
-      }
-      body[data-skin="8bit"] input[type=range]::-moz-range-thumb{
-        width:14px;height:18px;background:#ffd700;
-        border:2px solid #b8960c;cursor:pointer;border-radius:0;
-      }
-
-      /* 8-bit scrollbar */
-      body[data-skin="8bit"] ::-webkit-scrollbar{width:8px;background:#050510;}
-      body[data-skin="8bit"] ::-webkit-scrollbar-thumb{background:#1a3a6e;border:1px solid #0a2050;}
-
-      /* 8-bit select options */
-      body[data-skin="8bit"] select option{background:#0a0a1a;color:#ffd700;}
-
-      /* Nav tabs — keep compact */
-      body[data-skin="8bit"] .nav-tab{font-size:8px;letter-spacing:.5px;text-transform:uppercase;padding:8px 6px;}
-
-      /* Prevent any element overflowing screen width in 8bit mode */
-      body[data-skin="8bit"] * {
-        max-width:100%;
-        box-sizing:border-box;
-      }
-      body[data-skin="8bit"] div,
-      body[data-skin="8bit"] span,
-      body[data-skin="8bit"] p {
-        word-break:break-word;
-        overflow-wrap:break-word;
-      }
-      /* clamp all inline fontSizes set via style props in 8bit mode */
-      body[data-skin="8bit"] { font-size:11px; }
 
       /* ── Base styles (shared) ── */
       html,body{background:var(--bg);font-family:var(--sans);color:var(--ink);
@@ -309,10 +207,7 @@ const G = ({ skin }) => {
 
       /* CARDS */
       .card{background:var(--white);border:2px solid var(--rule);border-radius:var(--r);box-shadow:var(--card-shadow);}
-      body[data-skin="8bit"] .card{border-width:3px;border-color:#1a3a6e;position:relative;}
-      body[data-skin="8bit"] .card::before{content:'';position:absolute;top:-1px;left:-1px;right:-1px;bottom:-1px;border:1px solid #0a2050;pointer-events:none;z-index:0;}
       .card-l{border-left:3px solid var(--accent);}
-      body[data-skin="8bit"] .card-l{border-left-width:4px;}
 
       /* BUTTONS */
       .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
@@ -330,23 +225,6 @@ const G = ({ skin }) => {
         border:2px solid var(--rule);background:#fff;color:var(--ink3);cursor:pointer;transition:all .15s;}
       .btn-pill.on{background:var(--gold);color:var(--ink);border-color:var(--gold-dark);}
 
-      /* 8-bit button overrides */
-      body[data-skin="8bit"] .btn{font-size:8px;border-radius:0;font-weight:400;
-        letter-spacing:.3px;text-transform:uppercase;line-height:1.4;padding:8px 12px;
-        transition:transform .05s,box-shadow .05s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-      body[data-skin="8bit"] .btn:hover:not(:disabled){filter:none;}
-      body[data-skin="8bit"] .btn:active:not(:disabled){transform:translate(2px,2px);box-shadow:none!important;}
-      body[data-skin="8bit"] .btn:disabled{opacity:.3;}
-      body[data-skin="8bit"] .btn-p{border:2px solid #660018;box-shadow:3px 3px 0 #660018;}
-      body[data-skin="8bit"] .btn-p:hover:not(:disabled){background:#ff1a3a;filter:none;}
-      body[data-skin="8bit"] .btn-o{background:#0a0a1a;border:2px solid var(--gold);color:var(--gold);box-shadow:3px 3px 0 #b8960c;}
-      body[data-skin="8bit"] .btn-o:hover:not(:disabled){background:#1a1200;filter:none;}
-      body[data-skin="8bit"] .btn-g{background:#0a0a1a;color:#445566;border:2px solid #1a3a6e;box-shadow:2px 2px 0 #0a2050;}
-      body[data-skin="8bit"] .btn-g:hover:not(:disabled){background:#0a1a3a;color:#a0c8f0;filter:none;}
-      body[data-skin="8bit"] .btn-sm{font-size:8px;padding:6px 9px;}
-      body[data-skin="8bit"] .btn-pill{border-radius:0;font-size:9px;font-weight:400;
-        padding:8px 12px;background:#0a1224;color:#9db4d4;border:2px solid #2a5a9e;letter-spacing:.4px;text-transform:uppercase;}
-      body[data-skin="8bit"] .btn-pill.on{background:#2a1f00;color:#ffd700;border-color:#ffcc28;box-shadow:2px 2px 0 #b8960c;font-weight:700;}
 
       /* INPUTS */
       .inp{width:100%;padding:10px 12px;border:2px solid var(--rule);border-radius:var(--r);
@@ -357,17 +235,10 @@ const G = ({ skin }) => {
         font-size:14px;color:#1E3A6E;background:#fff;outline:none;appearance:none;cursor:pointer;}
       .sel:focus{border-color:var(--ink);}
 
-      body[data-skin="8bit"] .inp,
-      body[data-skin="8bit"] .sel{font-size:9px;border-color:#1a3a6e;background:#0a0a1a;
-        border-radius:0;letter-spacing:.3px;}
-      body[data-skin="8bit"] .inp:focus{border-color:#ffd700;box-shadow:0 0 0 1px #ffd700;}
-      body[data-skin="8bit"] .inp::placeholder{color:#223344;}
-      body[data-skin="8bit"] .sel:focus{border-color:#ffd700;}
 
       /* LABELS */
       label.lbl{display:block;font-size:11px;font-weight:700;color:var(--ink3);
         letter-spacing:1.2px;text-transform:uppercase;margin-bottom:5px;}
-      body[data-skin="8bit"] label.lbl{font-size:8px;color:#4a6890;letter-spacing:1.5px;margin-bottom:6px;line-height:1.6;}
 
       /* TAGS */
       .tag{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;}
@@ -375,165 +246,48 @@ const G = ({ skin }) => {
       .tag-b{background:#C8E4FF;color:var(--ink);border:1px solid var(--rule);}
       .tag-c{background:var(--gold-pale);color:var(--gold-dark);border:1px solid var(--gold-dark);}
       .tag-d{background:#E8F4FF;color:var(--ink3);border:1px solid var(--rule);}
-      body[data-skin="8bit"] .tag{font-size:8px;font-weight:400;padding:3px 7px;border-radius:0;letter-spacing:.5px;text-transform:uppercase;}
-      body[data-skin="8bit"] .tag-a{background:#3a0010;color:#ff6080;border:2px solid #e63946;}
-      body[data-skin="8bit"] .tag-b{background:#001a3a;color:#a0c8f0;border:2px solid #1a3a6e;}
-      body[data-skin="8bit"] .tag-c{background:#1a1200;color:#ffd700;border:2px solid #b8960c;}
-      body[data-skin="8bit"] .tag-d{background:#050510;color:#445566;border:2px solid #1a3a6e;}
 
       /* NAV TABS */
       .nav-tab{background:none;border:none;border-bottom:3px solid transparent;
         font-family:var(--sans);font-size:13px;font-weight:700;color:rgba(255,255,255,.65);
         padding:10px 0;cursor:pointer;transition:all .15s;}
       .nav-tab.active{color:var(--gold);border-bottom-color:var(--gold);}
-      body[data-skin="8bit"] .nav-tab{font-size:8px;letter-spacing:.5px;text-transform:uppercase;}
 
       /* GARMIN BOX */
       .garmin-box{background:var(--bg);border:2px solid var(--rule);border-radius:var(--r);
         padding:12px 14px;font-family:var(--mono);font-size:12px;color:var(--ink2);
         line-height:1.7;white-space:pre-wrap;word-break:break-word;}
-      body[data-skin="8bit"] .garmin-box{background:#050510;border-color:#1a3a6e;border-radius:0;
-        font-family:'VT323',monospace;font-size:16px;color:#a0c8f0;}
 
       .rule{border:none;border-top:2px solid var(--rule);margin:16px 0;}
-      body[data-skin="8bit"] .rule{border-top-color:#1a3a6e;margin:12px 0;}
 
       .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);
         border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;}
-      body[data-skin="8bit"] .spin{border-radius:0;border-top-color:#ffd700;
-        animation:spin .4s steps(8) infinite;}
 
       .copied{color:var(--accent)!important;}
       select option{background:#fff;}
 
-      /* ── Dark Trainer skin — applied when <body data-skin="dark"> ── */
-      body[data-skin="dark"]{
-        --ink:#E4E8F0; --ink2:#A0B4CC; --ink3:#6A7F96; --ink4:#3A4D60;
-        --rule:#1E2B38; --bg:#0A0B0E; --white:#111318; --black:#E4E8F0;
-        --accent:#39FF9A; --accent-light:rgba(57,255,154,0.08);
-        --warn:#FF4757; --yellow:#FFD32A; --blue:#00B4FF;
-        --hud:#0D0F13; --nav:#111318; --navtab:#161C24;
-        --gold:#39FF9A; --gold-dark:#22CC72; --gold-pale:rgba(57,255,154,0.06);
-        --card-shadow:0 1px 3px rgba(0,0,0,0.6);
-        --sans:'Space Grotesk','IBM Plex Sans',sans-serif;
-        --mono:'IBM Plex Mono',monospace;
-        --display:'IBM Plex Mono',monospace;
-        --r:6px;
-        background:#0A0B0E;
-      }
-      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
-      body[data-skin="dark"] .card{background:#111318;border-color:#1E2B38;box-shadow:0 1px 3px rgba(0,0,0,.6);}
-      body[data-skin="dark"] .card-l{border-left-color:var(--accent);}
-      body[data-skin="dark"] .btn{border-radius:5px;}
-      body[data-skin="dark"] .btn-p{background:#39FF9A;border-color:#22CC72;color:#0A0B0E;box-shadow:none;}
-      body[data-skin="dark"] .btn-p:hover:not(:disabled){background:#22CC72;filter:none;}
-      body[data-skin="dark"] .btn-o{background:#111318;border-color:#39FF9A;color:#39FF9A;box-shadow:none;}
-      body[data-skin="dark"] .btn-o:hover:not(:disabled){background:rgba(57,255,154,0.08);filter:none;}
-      body[data-skin="dark"] .btn-g{background:#111318;border-color:#1E2B38;color:#3A4D60;box-shadow:none;}
-      body[data-skin="dark"] .btn-g:hover:not(:disabled){background:#161C24;color:#6A7F96;filter:none;}
-      body[data-skin="dark"] .btn-pill.on{background:rgba(57,255,154,0.12);color:#39FF9A;border-color:#39FF9A;}
-      body[data-skin="dark"] .inp,
-      body[data-skin="dark"] .sel{background:#0D0F13;border-color:#1E2B38;color:#E4E8F0;}
-      body[data-skin="dark"] .inp:focus{border-color:#39FF9A;box-shadow:0 0 0 1px rgba(57,255,154,0.3);}
-      body[data-skin="dark"] .inp::placeholder{color:#2A3A4A;}
-      body[data-skin="dark"] label.lbl{color:#3A4D60;letter-spacing:1.2px;}
-      body[data-skin="dark"] .tag{border-radius:4px;font-size:10px;}
-      body[data-skin="dark"] .tag-a{background:rgba(255,71,87,0.1);color:#FF4757;border-color:#FF4757;}
-      body[data-skin="dark"] .tag-b{background:rgba(0,180,255,0.08);color:#00B4FF;border-color:#00B4FF;}
-      body[data-skin="dark"] .tag-c{background:rgba(57,255,154,0.08);color:#39FF9A;border-color:#39FF9A;}
-      body[data-skin="dark"] .tag-d{background:#111318;color:#3A4D60;border-color:#1E2B38;}
-      body[data-skin="dark"] .nav-tab{font-size:11px;letter-spacing:.5px;}
-      body[data-skin="dark"] .garmin-box{background:#0D0F13;border-color:#1E2B38;border-radius:6px;}
-      body[data-skin="dark"] .rule{border-top-color:#1E2B38;}
-      body[data-skin="dark"] .spin{border-top-color:#39FF9A;}
-      body[data-skin="dark"] select option{background:#111318;color:#E4E8F0;}
-      body[data-skin="dark"] ::-webkit-scrollbar{width:6px;background:#0A0B0E;}
-      body[data-skin="dark"] ::-webkit-scrollbar-thumb{background:#1E2B38;border-radius:3px;}
 
-      /* ── Socceroos skin — World Cup 2026 special edition ──────────────────
-         Active until 19 July 2026. Gold & Green. Come on, Aussie!
-      ── */
-      body[data-skin="socceroos"]{
-        --ink:#1A1A1A; --ink2:#003D1F; --ink3:#006633; --ink4:#5A8F6E;
-        --rule:#A8D5B5; --bg:#F0FFF4; --white:#FFFFFF; --black:#003D1F;
-        --accent:#006633; --accent-light:#D4EDDA;
-        --warn:#CC0000; --yellow:#FFD700; --blue:#003D1F;
-        --hud:#003D1F; --nav:#006633; --navtab:#008040;
-        --gold:#FFD700; --gold-dark:#C8A800; --gold-pale:#FFFDE0;
-        --card-shadow:3px 3px 0 #A8D5B5;
-        --sans:'IBM Plex Sans',sans-serif;
-        --mono:'IBM Plex Mono',monospace;
-        --display:'Bebas Neue',sans-serif;
-        --r:6px;
-        background:#F0FFF4;
-      }
-
-      /* Subtle pitch-stripe background */
-      body[data-skin="socceroos"]{
-        background-image:repeating-linear-gradient(
-          180deg,
-          transparent 0px, transparent 40px,
-          rgba(0,102,51,0.04) 40px, rgba(0,102,51,0.04) 80px
-        );
-      }
-
-      body[data-skin="socceroos"] .card{
-        background:#fff;border-color:#A8D5B5;
-        box-shadow:3px 3px 0 #A8D5B5;
-      }
-      body[data-skin="socceroos"] .card-l{border-left-color:#FFD700;border-left-width:4px;}
-
-      body[data-skin="socceroos"] .btn-p{
-        background:#006633;border:2px solid #003D1F;color:#FFD700;
-        box-shadow:3px 3px 0 #003D1F;font-weight:700;
-      }
-      body[data-skin="socceroos"] .btn-p:hover:not(:disabled){
-        background:#003D1F;
-      }
-      body[data-skin="socceroos"] .btn-o{
-        background:#fff;border:2px solid #006633;color:#006633;
-        box-shadow:2px 2px 0 #006633;
-      }
-      body[data-skin="socceroos"] .btn-o:hover:not(:disabled){
-        background:#006633;color:#FFD700;
-      }
-      body[data-skin="socceroos"] .btn-g{
-        background:#fff;border:1px solid #A8D5B5;color:#5A8F6E;
-      }
-      body[data-skin="socceroos"] .btn-g:hover:not(:disabled){
-        background:#F0FFF4;color:#006633;
-      }
-
-      body[data-skin="socceroos"] .inp,
-      body[data-skin="socceroos"] .sel{
-        background:#fff;border-color:#A8D5B5;color:#1A1A1A;
-      }
-      body[data-skin="socceroos"] .inp:focus{
-        border-color:#006633;box-shadow:0 0 0 2px rgba(0,102,51,0.15);
-      }
-      body[data-skin="socceroos"] .inp::placeholder{color:#A8D5B5;}
-      body[data-skin="socceroos"] label.lbl{color:#5A8F6E;letter-spacing:1px;}
-
-      /* Nav header — green with gold text */
-      body[data-skin="socceroos"] .nav-tab{
-        color:#FFD700;font-weight:700;letter-spacing:.5px;
-      }
-
-      /* Accent / selected tab highlight */
-      body[data-skin="socceroos"] .nav-tab.active,
-      body[data-skin="socceroos"] .nav-tab[aria-selected="true"]{
-        background:#FFD700;color:#003D1F;
-      }
-
-      body[data-skin="socceroos"] .rule{border-top-color:#A8D5B5;}
-      body[data-skin="socceroos"] .spin{border-top-color:#FFD700;}
-      body[data-skin="socceroos"] select option{background:#fff;color:#1A1A1A;}
-      body[data-skin="socceroos"] ::-webkit-scrollbar{width:6px;background:#F0FFF4;}
-      body[data-skin="socceroos"] ::-webkit-scrollbar-thumb{background:#A8D5B5;border-radius:3px;}
     `}</style>
   );
 };
 
+
+// ─────────────────────────────────────────────────────────────
+//  BEGINNER TRACK — "you hit your goal" celebration messages
+//  Fired once, the first time a Healthy Bronie ticks off a session in
+//  their plan's goal week. Fun, low-key, earned — not another set of
+//  instructions. Randomly picked so it doesn't get stale on repeat use.
+// ─────────────────────────────────────────────────────────────
+const GOAL_CELEBRATION_MESSAGES = [
+  "You've earned a donut. No negotiation. 🍩",
+  "That's a coldie earned tonight — maybe two. 🍺",
+  "Eat whatever you want today. You've banked it.",
+  "You might be sore this arvo — a lay-down's not lazy, it's recovery.",
+  "Legend. Put your feet up, you've done the hard part.",
+  "That's Bronies-run pace now. Actual, real proof.",
+  "Whatever's in the fridge is fair game tonight.",
+  "Zero guilt required. Go enjoy your weekend.",
+];
 
 // ─────────────────────────────────────────────────────────────
 //  CONSTANTS
@@ -1726,7 +1480,7 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
               <span style={{fontSize:11,fontWeight:600,padding:"3px 8px",borderRadius:20,
                 background:"var(--bg)",color:ph.color,border:"1px solid var(--rule)"}}>{ph.label} Phase</span>
               {week.isDown && <span style={{fontSize:11,fontWeight:600,padding:"3px 8px",borderRadius:20,
-                background:"#C8E4FF",color:"var(--ink)"}}>Recovery</span>}
+                background:"#C8E4FF",color:"#1a56db"}}>Recovery</span>}
               {week.isPeakLong && <span style={{fontSize:11,fontWeight:600,padding:"3px 8px",borderRadius:20,
                 background:"var(--gold-pale)",color:"var(--gold-dark)"}}>⭐ Peak Long Run</span>}
             </div>
@@ -1912,7 +1666,7 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
       {/* Tomorrow banner */}
       {tomorrowSession && (
         <div style={{margin:"8px var(--pad-x) 0",padding:"10px 14px",
-          borderRadius:"var(--r)",background:"var(--ink)",color:"white",
+          borderRadius:"var(--r)",background:"var(--navtab)",color:"white",
           display:"flex",alignItems:"center",gap:10,fontSize:13}}>
           <div style={{fontSize:16}}>📅</div>
           <div>
@@ -2084,19 +1838,19 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
             <div key={i} id={isCurrent ? "current-week-row" : undefined}
               onClick={() => onSelectWeek(i)}
               style={{borderBottom:"1px solid var(--rule)",cursor:"pointer",
-                background:isCurrent?"rgba(0,240,255,0.08)":isRace?"var(--accent-light)":"white",
+                background:isCurrent?"rgba(0,240,255,0.08)":isRace?"var(--accent-light)":"var(--white)",
                 transition:"background .1s",
                 borderLeft: isCurrent ? "4px solid var(--accent)" : "4px solid transparent",
                 opacity: isPast ? 0.55 : 1,
               }}
               onMouseEnter={e => !isRace && (e.currentTarget.style.background = isCurrent?"rgba(0,240,255,0.12)":"var(--bg)")}
-              onMouseLeave={e => !isRace && (e.currentTarget.style.background = isCurrent?"rgba(0,240,255,0.08)":"white")}>
+              onMouseLeave={e => !isRace && (e.currentTarget.style.background = isCurrent?"rgba(0,240,255,0.08)":"var(--white)")}>
               <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px var(--pad-x) 4px"}}>
                 <div style={{width:30,height:30,borderRadius:"50%",flexShrink:0,
-                  background:isCurrent?"var(--accent)":isRace?"#FFD0D8":w.isPeakLong?"var(--gold-pale)":w.isDown?"#E8F4FF":"#fff",
+                  background:isCurrent?"var(--accent)":isRace?"#FFD0D8":w.isPeakLong?"var(--gold-pale)":w.isDown?"#E8F4FF":"var(--white)",
                   border:`1.5px solid ${isCurrent?"var(--accent)":isRace?"var(--accent)":w.isPeakLong?"#7a4f00":"var(--rule)"}`,
                   display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:11,fontWeight:700,color:isCurrent?"white":isRace||w.isPeakLong?"white":"var(--ink3)"}}>
+                  fontSize:11,fontWeight:700,color:isCurrent?"white":isRace?"#c0392b":w.isPeakLong?"white":w.isDown?"#1a56db":"var(--ink3)"}}>
                   {isRace ? "🏁" : w.weekNum}
                 </div>
                 <div style={{flex:1,minWidth:0}}>
@@ -2276,10 +2030,19 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
 //  UI: Day plan picker (used in onboarding)
 //  Each day gets a slot type: workout / easy / long / bronies / rest
 // ─────────────────────────────────────────────────────────────
-function DayPlanPicker({ value, onChange }) {
+function DayPlanPicker({ value, onChange, simplified }) {
   const plan = value || DEFAULT_DAY_PLAN;
   const RUN_TYPES = ["workout", "easy", "long", "bronies", "rest"];
-  const ALL_SLOTS  = ["workout", "easy", "long", "bronies", "strength", "rest"];
+  // Beginner track: the engine only distinguishes run-day vs rest-day (isRunDay()),
+  // so "Workout" and "Long Run" are meaningless distinctions here and just confuse
+  // a brand-new runner. Collapse them down to Easy Run / BRONIES / Rest (+Str stays,
+  // strength work is genuinely useful injury-prevention for this group).
+  const ALL_SLOTS = simplified
+    ? ["easy", "bronies", "strength", "rest"]
+    : ["workout", "easy", "long", "bronies", "strength", "rest"];
+  // For display only — a profile carried over from the default day plan may still
+  // have "workout"/"long" set on a day; treat those as "easy" so the pill lights up.
+  const displaySlot = k => (simplified && (k === "workout" || k === "long")) ? "easy" : k;
 
   function toggleDay(dayId, key) {
     const current      = normaliseSlot(plan[dayId]);
@@ -2318,6 +2081,7 @@ function DayPlanPicker({ value, onChange }) {
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {DAYS.map(d => {
         const current      = normaliseSlot(plan[d.id]);
+        const displayCurrent = current.map(displaySlot);
         const primary      = primarySlot(current);
         const strengthOn   = current.includes("strength");
         const isBroniesDay = d.id === "wed" || d.id === "fri";
@@ -2333,7 +2097,7 @@ function DayPlanPicker({ value, onChange }) {
                 {availableSlots.map(k => {
                   const m = SLOT_TYPES[k];
                   const isStrengthBtn = k === "strength";
-                  const active   = isStrengthBtn ? strengthOn : current.includes(k);
+                  const active   = isStrengthBtn ? strengthOn : displayCurrent.includes(k);
                   const disabled = false; // strength always toggleable
                   return (
                     <React.Fragment key={k}>
@@ -2347,7 +2111,7 @@ function DayPlanPicker({ value, onChange }) {
                           fontSize:11,fontWeight:600,cursor:disabled?"not-allowed":"pointer",
                           borderRadius:14,opacity:disabled?0.35:1,
                           border:`1.5px solid ${active ? m.color : "var(--rule)"}`,
-                          background: active ? m.color : "white",
+                          background: active ? m.color : "var(--white)",
                           color: active ? "white" : "var(--ink3)",
                           transition:"all .15s",
                         }}>
@@ -2361,7 +2125,7 @@ function DayPlanPicker({ value, onChange }) {
             </div>
             {strengthOn && primary !== "rest" && primary !== "strength" && (
               <div style={{padding:"3px 12px 7px 70px",fontSize:10,color:"var(--ink4)",fontStyle:"italic"}}>
-                {SLOT_TYPES[primary]?.icon} {SLOT_TYPES[primary]?.label} + 🏋 Strength after your run
+                {SLOT_TYPES[displaySlot(primary)]?.icon} {SLOT_TYPES[displaySlot(primary)]?.label} + 🏋 Strength after your run
               </div>
             )}
           </div>
@@ -3114,7 +2878,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
     onComplete(profile, isEvent ? data.event : null);
   }
 
-  const totalSteps = isHangout ? 2 : isMaintenance ? 3 : isFitness ? 5 : 6;
+  const totalSteps = isHangout ? 2 : isMaintenance ? 3 : isFitness ? 4 : 6;
   const canNext = (() => {
     if (step === 1) return !!data.trainingGoal;
     if (step === 2) {
@@ -3336,8 +3100,8 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                   onClick={() => up("returningRunner", opt.id)}
                   style={{flex:1,padding:"8px 10px",borderRadius:"var(--r)",cursor:"pointer",
                     fontSize:12,fontWeight:700,
-                    border:`1.5px solid ${data.returningRunner===opt.id?"var(--ink)":"var(--rule)"}`,
-                    background:data.returningRunner===opt.id?"var(--ink)":"white",
+                    border:`1.5px solid ${data.returningRunner===opt.id?"var(--accent)":"var(--rule)"}`,
+                    background:data.returningRunner===opt.id?"var(--accent)":"var(--white)",
                     color:data.returningRunner===opt.id?"white":"var(--ink3)",
                     transition:"all .15s"}}>
                   {opt.label}
@@ -3601,8 +3365,8 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                     <div key={opt.value} onClick={()=>toggleSlot(opt.value)}
                       style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",
                         cursor:"pointer",borderRadius:"var(--r)",border:"1.5px solid",
-                        borderColor:slots.includes(opt.value)?"var(--ink)":"var(--rule)",
-                        background:slots.includes(opt.value)?"var(--ink)":"white",
+                        borderColor:slots.includes(opt.value)?"var(--accent)":"var(--rule)",
+                        background:slots.includes(opt.value)?"var(--accent)":"var(--white)",
                         color:slots.includes(opt.value)?"white":"var(--ink)"}}>
                       <div style={{fontWeight:700,fontSize:14}}>{opt.label}</div>
                       <div style={{fontSize:12,opacity:.75,marginLeft:"auto"}}>{opt.desc}</div>
@@ -3667,8 +3431,8 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                   <div key={d.id} onClick={()=>cycleDay(d.id)}
                     style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",
                       borderRadius:"var(--r)",border:"1.5px solid",cursor:"pointer",
-                      borderColor:isRest?"var(--rule)":"var(--ink)",
-                      background:isRest?"white":"var(--ink)",
+                      borderColor:isRest?"var(--rule)":"var(--accent)",
+                      background:isRest?"var(--white)":"var(--accent)",
                       color:isRest?"var(--ink3)":"white",
                       opacity:isRest?.6:1}}>
                     <div style={{width:36,fontSize:12,fontWeight:700,letterSpacing:.8}}>{d.short}</div>
@@ -3808,7 +3572,7 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
           <div style={{fontSize:14,color:"var(--ink3)",marginBottom:20,fontStyle:"italic"}}>
             Pick the days that suit your schedule — we'll keep the load gentle
           </div>
-          <DayPlanPicker value={data.dayPlan} onChange={v => up("dayPlan", v)}/>
+          <DayPlanPicker value={data.dayPlan} onChange={v => up("dayPlan", v)} simplified/>
         </div>
       )}
 
@@ -3892,8 +3656,8 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                             onClick={() => up("workoutMinutes", { ...mins, [d.id]: opt })}
                             style={{padding:"8px 14px",fontSize:13,fontWeight:700,
                               borderRadius:"var(--r)",cursor:"pointer",
-                              border:`2px solid ${current===opt?"var(--ink)":"var(--rule)"}`,
-                              background:current===opt?"var(--ink)":"white",
+                              border:`2px solid ${current===opt?"var(--accent)":"var(--rule)"}`,
+                              background:current===opt?"var(--accent)":"var(--white)",
                               color:current===opt?"white":"var(--ink3)",
                               transition:"all .15s"}}>
                             {opt}min
@@ -3911,62 +3675,9 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
 
 
       {/* STEP 5 (fitness): Workout duration */}
-      {step === 5 && isFitness && (() => {
-        const workoutDays = DAYS.filter(d => {
-          const slot = primarySlot(normaliseSlot(data.dayPlan?.[d.id]));
-          return isWorkoutSlot(slot);
-        });
-        const mins = data.workoutMinutes || DEFAULT_WORKOUT_MINUTES;
-        return (
-          <div>
-            <div style={{fontFamily:"var(--display)",fontSize:"clamp(22px,8vw,32px)",letterSpacing:1,marginBottom:6}}>
-              Workout duration
-            </div>
-            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:6,fontStyle:"italic"}}>
-              Set how long each workout day should run. Different days can have different durations —
-              longer = more reps and a bigger stimulus.
-            </div>
-            <div style={{fontSize:12,color:"var(--ink4)",marginBottom:20}}>
-              45min is the standard. 90min is a big day.
-            </div>
-            {workoutDays.length === 0 ? (
-              <div style={{padding:"16px",background:"var(--surface)",borderRadius:"var(--r)",
-                fontSize:13,color:"var(--ink3)",textAlign:"center"}}>
-                No workout days set — go back and assign at least one day as Workout to adjust duration.
-              </div>
-            ) : (
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {workoutDays.map(d => {
-                  const current = mins[d.id] || 45;
-                  return (
-                    <div key={d.id} style={{padding:"12px 14px",background:"var(--surface)",
-                      borderRadius:"var(--r)",border:"1px solid var(--rule)"}}>
-                      <div style={{fontSize:12,fontWeight:700,color:"var(--ink2)",
-                        letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>
-                        {d.label}
-                      </div>
-                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                        {[45, 60, 75, 90].map(opt => (
-                          <button key={opt}
-                            onClick={() => up("workoutMinutes", { ...mins, [d.id]: opt })}
-                            style={{padding:"8px 14px",fontSize:13,fontWeight:700,
-                              borderRadius:"var(--r)",cursor:"pointer",
-                              border:`2px solid ${current===opt?"var(--ink)":"var(--rule)"}`,
-                              background:current===opt?"var(--ink)":"white",
-                              color:current===opt?"white":"var(--ink3)",
-                              transition:"all .15s"}}>
-                            {opt}min
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {/* Note: fitness/beginner onboarding ends at step 4 — the beginner engine
+          builds session length from distance + pace, not a duration setting,
+          so there's no "workout duration" step here. */}
 
       {/* Nav buttons */}
       <div style={{display:"flex",gap:10,marginTop:28}}>
@@ -4304,8 +4015,8 @@ function PaceCalculatorScreen({ onBack }) {
         ].map(t => (
           <button key={t.id} onClick={() => setMode(t.id)}
             style={{ flex:1, padding:"9px 8px", borderRadius:"var(--r)", cursor:"pointer",
-              border:`2px solid ${mode===t.id?"var(--ink)":"var(--rule)"}`,
-              background: mode===t.id?"var(--ink)":"var(--white)",
+              border:`2px solid ${mode===t.id?"var(--accent)":"var(--rule)"}`,
+              background: mode===t.id?"var(--accent)":"var(--white)",
               color: mode===t.id?"#fff":"var(--ink3)",
               fontSize:12, fontWeight:700, transition:"all .15s" }}>
             {t.label}
@@ -4372,7 +4083,7 @@ function PaceCalculatorScreen({ onBack }) {
       )}
 
       {/* Result card */}
-      <div className="card" style={{ padding:"16px 18px", marginBottom:20, background:"var(--ink)",
+      <div className="card" style={{ padding:"16px 18px", marginBottom:20, background:"var(--navtab)",
         color:"white", borderRadius:"var(--r)" }}>
         {mode === "pace" ? (
           <>
@@ -4826,8 +4537,8 @@ function WorkoutCreatorScreen({ onBack }) {
                 onClick={() => { setWatchView(t.id); setGenerated(false); }}
                 style={{ flex:1, padding:"9px 8px", borderRadius:"var(--r)",
                   cursor:"pointer", transition:"all .15s", textAlign:"center",
-                  border:`2px solid ${watchView === t.id ? "var(--ink)" : "var(--rule)"}`,
-                  background: watchView === t.id ? "var(--ink)" : "var(--white)",
+                  border:`2px solid ${watchView === t.id ? "var(--accent)" : "var(--rule)"}`,
+                  background: watchView === t.id ? "var(--accent)" : "var(--white)",
                   color: watchView === t.id ? "#fff" : "var(--ink3)" }}>
                 <div style={{ fontSize:12, fontWeight:700 }}>{t.label}</div>
                 <div style={{ fontSize:10, opacity:.7, marginTop:1 }}>{t.sub}</div>
@@ -5026,8 +4737,8 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
           <button key={d.label}
             onClick={() => setDistKm(String(d.km))}
             style={{ padding:"6px 14px", borderRadius:"var(--r)", fontSize:12, fontWeight:700,
-              border:`2px solid ${parseFloat(distKm) === d.km ? "var(--ink)" : "var(--rule)"}`,
-              background: parseFloat(distKm) === d.km ? "var(--ink)" : "var(--white)",
+              border:`2px solid ${parseFloat(distKm) === d.km ? "var(--accent)" : "var(--rule)"}`,
+              background: parseFloat(distKm) === d.km ? "var(--accent)" : "var(--white)",
               color: parseFloat(distKm) === d.km ? "#fff" : "var(--ink3)",
               cursor:"pointer", transition:"all .15s" }}>
             {d.label}
@@ -5082,8 +4793,8 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
                 onClick={() => setFuelIntervalMins(fuelIntervalMins === min ? null : min)}
                 style={{ padding:"6px 2px", borderRadius:"var(--r)", fontSize:11, fontWeight:700,
                   textAlign:"center", cursor:"pointer", transition:"all .15s",
-                  border:`2px solid ${isSelected ? "var(--ink)" : isRecommended ? "var(--accent)" : "var(--rule)"}`,
-                  background: isSelected ? "var(--ink)" : isRecommended ? "var(--accent-light)" : "var(--white)",
+                  border:`2px solid ${isSelected ? "var(--accent)" : isRecommended ? "var(--accent)" : "var(--rule)"}`,
+                  background: isSelected ? "var(--accent)" : isRecommended ? "var(--accent-light)" : "var(--white)",
                   color: isSelected ? "#fff" : isRecommended ? "var(--accent)" : "var(--ink3)" }}>
                 {min}
               </button>
@@ -5121,8 +4832,8 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
           <button key={c.value}
             onClick={() => setConditions(c.value)}
             style={{ padding:"8px 4px", borderRadius:"var(--r)", fontSize:11, fontWeight:700,
-              border:`2px solid ${conditions === c.value ? "var(--ink)" : "var(--rule)"}`,
-              background: conditions === c.value ? "var(--ink)" : "var(--white)",
+              border:`2px solid ${conditions === c.value ? "var(--accent)" : "var(--rule)"}`,
+              background: conditions === c.value ? "var(--accent)" : "var(--white)",
               color: conditions === c.value ? "#fff" : "var(--ink3)",
               cursor:"pointer", transition:"all .15s", textAlign:"center" }}>
             <div>{c.label}</div>
@@ -5461,7 +5172,7 @@ function RaceModePanel({ race, strategy, validLegs }) {
 
   return (
     <div style={{margin:"0 var(--pad-x) 12px",padding:"16px",
-      background: isRaceDay ? "#1a472a" : "var(--ink)",
+      background: isRaceDay ? "#1a472a" : "var(--navtab)",
       color:"white",borderRadius:"var(--r)"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
         <div style={{fontSize:24}}>{isRaceDay ? "🏁" : "📅"}</div>
@@ -5524,7 +5235,7 @@ function RaceDayLiveView({ racePlan, onExit }) {
         idx: i,
         name: l.name || `Aid ${i + 1}`,
         legKm: parseFloat(l.km) || 0,     // distance of this leg
-        cumKm: to99(cum),                  // total distance at this station
+        cumKm: Math.round(cum * 10) / 10,  // total distance at this station — actual course distance, not .99-branded
         gainM: parseInt(l.gainM, 10) || 0,
         note: l.raceNote || "",
         stock: l.stock || "",
@@ -5565,7 +5276,7 @@ function RaceDayLiveView({ racePlan, onExit }) {
 
   // Distance from previous station (or start) to the next one
   const prevCum = nextIdx > 0 ? stations[nextIdx - 1].cumKm : 0;
-  const legDist = next ? to99(next.cumKm - prevCum) : 0;
+  const legDist = next ? Math.round((next.cumKm - prevCum) * 10) / 10 : 0;
   const etaMin  = Math.round(legDist * minPerKm);
   const etaStr  = etaMin >= 60
     ? `${Math.floor(etaMin / 60)}h ${etaMin % 60}m`
@@ -6105,8 +5816,8 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
               onClick={() => updateStrategy({ conditions: opt.value })}
               style={{
                 flex:1, padding:"10px 12px", borderRadius:"var(--r)", cursor:"pointer",
-                border:`2px solid ${strategy.conditions === opt.value ? "var(--ink)" : "var(--rule)"}`,
-                background: strategy.conditions === opt.value ? "var(--ink)" : "var(--white)",
+                border:`2px solid ${strategy.conditions === opt.value ? "var(--accent)" : "var(--rule)"}`,
+                background: strategy.conditions === opt.value ? "var(--accent)" : "var(--white)",
                 color: strategy.conditions === opt.value ? "#fff" : "var(--ink3)",
                 fontWeight:700, fontSize:13, transition:"all .15s", textAlign:"left",
               }}>
@@ -6391,8 +6102,8 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
             <button key={t.v}
               onClick={() => setCustomType(t.v)}
               style={{ flex:1, padding:"7px 8px", borderRadius:"var(--r)", cursor:"pointer",
-                border:`2px solid ${customType===t.v ? "var(--ink)" : "var(--rule)"}`,
-                background: customType===t.v ? "var(--ink)" : "var(--white)",
+                border:`2px solid ${customType===t.v ? "var(--accent)" : "var(--rule)"}`,
+                background: customType===t.v ? "var(--accent)" : "var(--white)",
                 color: customType===t.v ? "#fff" : "var(--ink3)",
                 textAlign:"left", transition:"all .15s" }}>
               <div style={{ fontSize:11, fontWeight:700 }}>{t.label}</div>
@@ -6581,7 +6292,7 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
             <div onClick={() => setExpandedLegs(prev => {
                 const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next;
               })}
-              style={{ background:"var(--ink)", padding:"10px 14px",
+              style={{ background:"var(--navtab)", padding:"10px 14px",
                 display:"flex", justifyContent:"space-between", alignItems:"center",
                 cursor:"pointer", userSelect:"none" }}>
               <div>
@@ -6759,7 +6470,7 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
                   <div style={{
                     width:18, height:18, flexShrink:0, borderRadius:3,
                     border:`2px solid ${checked ? "var(--ink3)" : cfg.border}`,
-                    background: checked ? "var(--ink)" : "var(--white)",
+                    background: checked ? "var(--accent)" : "var(--white)",
                     display:"flex", alignItems:"center", justifyContent:"center",
                     transition:"all .15s" }}>
                     {checked && (
@@ -6839,18 +6550,7 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
   );
 }
 
-function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, onLogout, onSignIn }) {
-  const is8bit = false; // legacy skin removed
-  const isDark  = skin === "dark";
-
-  // Toggle between the two themes: dark (neon) and light (alpine)
-  function cycleSkin() {
-    setSkin(isDark ? "light" : "dark");
-  }
-
-  // Button shows the theme you'll switch TO
-  const skinLabel  = isDark ? "Light" : "Dark";
-  const skinIcon   = isDark ? "☀️" : "🌙";
+function Header({ screen, onNav, hasData, onFeedback, userEmail, onLogout, onSignIn }) {
   return (
     <div style={{position:"sticky",top:0,zIndex:100}}>
       <div style={{background:"var(--hud)",padding:"4px var(--pad-x)",
@@ -7937,8 +7637,8 @@ function ProfileSwitcher() {
               return (
                 <div key={slug} style={{ display:"flex", alignItems:"center", gap:8,
                   padding:"9px 12px", borderRadius:"var(--r)",
-                  border:`2px solid ${isActive ? "var(--ink)" : "var(--rule)"}`,
-                  background: isActive ? "var(--ink)" : "var(--white)" }}>
+                  border:`2px solid ${isActive ? "var(--accent)" : "var(--rule)"}`,
+                  background: isActive ? "var(--accent)" : "var(--white)" }}>
                   <div style={{ flex:1, fontSize:12, fontWeight:isActive?700:500,
                     color: isActive ? "#fff" : "var(--ink)" }}>
                     {label}
@@ -8033,6 +7733,8 @@ export default function App() {
   const [feedbackOpen,     setFeedbackOpen]     = useState(false); // key: "weekNum:dayId" → "yeah_broo" | "nup_soft"
   const [planRebuildMsg,   setPlanRebuildMsg]   = useState("");   // banner shown after plan rebuild
   const [showWhatsNext,    setShowWhatsNext]    = useState(false); // post-race "What's next?" modal
+  const [showGoalCelebration, setShowGoalCelebration] = useState(false); // beginner-track "you did it!" modal
+  const [celebrationMsg,   setCelebrationMsg]    = useState("");
   const [noPlanFound,      setNoPlanFound]      = useState(false); // signed in but no saved plan located
   const [skin,           setSkinState]      = useState("dark"); // "dark" (neon) | "light" (alpine)
   const [racePlan,       setRacePlanState]  = useState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
@@ -8339,6 +8041,23 @@ export default function App() {
     const next = { ...completionMap, [key]: value };
     setCompletionMap(next);
     try { store.set("bep6_completions", JSON.stringify(next)); } catch {}
+
+    // Beginner-track goal celebration — fires once, the first time a Healthy
+    // Bronie ticks "yeah broo" on a session inside their plan's goal week.
+    if (value === "yeah_broo" && profile?.trainingGoal === "healthier") {
+      const weekNumStr = key.split(":")[0];
+      const wk = (plan || []).find(w => String(w.weekNum) === weekNumStr);
+      if (wk?.isPeakLong) {
+        const celebKey = `bep6_celebrated_${profile.currentLongest}_${profile.targetDistance || profile.targetDistanceKm}_${profile.timeline}`;
+        let already = false;
+        try { already = localStorage.getItem(celebKey) === "1"; } catch {}
+        if (!already) {
+          setCelebrationMsg(GOAL_CELEBRATION_MESSAGES[Math.floor(Math.random() * GOAL_CELEBRATION_MESSAGES.length)]);
+          setShowGoalCelebration(true);
+          try { localStorage.setItem(celebKey, "1"); } catch {}
+        }
+      }
+    }
   }
 
   // Swap the slot type (workout/easy/long/rest) for a specific day in a week.
@@ -8486,7 +8205,7 @@ export default function App() {
       <G skin={skin}/>
       <div style={{minHeight:"100vh",background:"var(--bg)",maxWidth:720,margin:"0 auto"}}>
         <Header screen={screen} onNav={s => { setSelWeek(null); setScreen(s); }}
-          hasData={hasData} skin={skin} setSkin={setSkin} onFeedback={() => setFeedbackOpen(true)} userEmail={userEmail} onLogout={handleLogout} onSignIn={() => setShowAuth(true)}/>
+          hasData={hasData} onFeedback={() => setFeedbackOpen(true)} userEmail={userEmail} onLogout={handleLogout} onSignIn={() => setShowAuth(true)}/>
 
         {screen === "welcome" && (
           <WelcomeScreen
@@ -8880,8 +8599,8 @@ export default function App() {
                                 onClick={() => handleWorkoutMinutesUpdate(d.id, opt)}
                                 style={{padding:"5px 10px",fontSize:11,fontWeight:700,
                                   borderRadius:"var(--r)",cursor:"pointer",
-                                  border:`2px solid ${current===opt?"var(--ink)":"var(--rule)"}`,
-                                  background:current===opt?"var(--ink)":"white",
+                                  border:`2px solid ${current===opt?"var(--accent)":"var(--rule)"}`,
+                                  background:current===opt?"var(--accent)":"var(--white)",
                                   color:current===opt?"white":"var(--ink3)",
                                   transition:"all .15s"}}>
                                 {opt}min
@@ -8944,6 +8663,41 @@ export default function App() {
       {/* Feedback + Bug report floating widget */}
       <FeedbackWidget currentScreen={screen} open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
 
+      {/* Beginner-track "you did it!" celebration modal */}
+      {showGoalCelebration && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:400,
+          display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={() => setShowGoalCelebration(false)}>
+          <div style={{background:"var(--white)",borderRadius:"var(--r) var(--r) 0 0",
+            width:"100%",maxWidth:560,padding:"28px var(--pad-x) 40px"}}
+            onClick={e => e.stopPropagation()}>
+            <div style={{fontFamily:"var(--display)",fontSize:28,letterSpacing:1,marginBottom:8}}>
+              You did it! 🎉
+            </div>
+            <div style={{fontSize:14,color:"var(--ink3)",marginBottom:4,fontStyle:"italic"}}>
+              {(() => {
+                const goal  = parseTargetKm(profile?.targetDistance, profile?.targetDistanceKm);
+                const start = parseCurrentKm(profile?.currentLongest);
+                return `${start}km to ${goal}km — that's the goal, done.`;
+              })()}
+            </div>
+            <div style={{fontSize:16,fontWeight:700,color:"var(--accent)",margin:"16px 0 24px"}}>
+              {celebrationMsg}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <button className="btn btn-p" style={{padding:"14px 0"}}
+                onClick={() => { setShowGoalCelebration(false); setScreen("onboarding"); }}>
+                🎯 Set a new goal
+              </button>
+              <button className="btn" style={{padding:"14px 0"}}
+                onClick={() => setShowGoalCelebration(false)}>
+                ✕ Nice, thanks
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Post-race "What's next?" modal */}
       {showWhatsNext && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:400,
@@ -8985,7 +8739,7 @@ export default function App() {
 
       {toast && (
         <div style={{position:"fixed",bottom:32,left:"50%",transform:"translateX(-50%)",
-          background:"var(--ink)",color:"white",padding:"10px 20px",borderRadius:"var(--r)",
+          background:"var(--navtab)",color:"white",padding:"10px 20px",borderRadius:"var(--r)",
           fontSize:13,fontWeight:600,zIndex:300,boxShadow:"0 4px 20px rgba(0,0,0,.2)"}}>
           {toast}
         </div>
