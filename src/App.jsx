@@ -8231,7 +8231,7 @@ export default function App() {
     setShowIntro(false);
   }
   if (showIntro && authReady && !profile && !showAuth) {
-    return <IntroWizard onDone={dismissIntro} />;
+    return <><G skin={skin}/><IntroWizard onDone={dismissIntro} /></>;
   }
 
   // Optional sign-in overlay — app is usable without it (data saved on-device)
