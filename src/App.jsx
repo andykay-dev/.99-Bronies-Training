@@ -153,72 +153,53 @@ const G = ({ skin }) => {
   return (
     <style>{`
       /* ── Default fonts (always loaded) ── */
-      @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&family=Caveat:wght@600&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&family=Caveat:wght@600&display=swap');
 
       *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 
       /* ── Default theme variables ── */
       :root{
-        --ink:#1E3A6E; --ink2:#2E5FA3; --ink3:#5570A0; --ink4:#8899BB;
-        --rule:#A0C8F0; --bg:#E8F4FF; --white:#fff; --black:#1E3A6E;
-        --accent:#E8063A; --accent-light:#FFE0E8;
-        --warn:#c0392b; --yellow:#C49A00; --blue:#2E5FA3;
-        --hud:#1A3060; --nav:#2E5FA3; --navtab:#3D73BF;
-        --gold:#F5C800; --gold-dark:#C49A00; --gold-pale:#FFF5B0;
-        --card-shadow:3px 3px 0 #A0C8F0;
-        --sans:'IBM Plex Sans',sans-serif; --mono:'IBM Plex Mono',monospace;
-        --display:'Bebas Neue',sans-serif; --handwrite:'Caveat',cursive;
-        --r:6px; --pad-x:12px; --pad-x-tight:10px;
+        /* ══ ARCADE THEME — the app's single theme.
+           Cyan / magenta / yellow on near-black. Glows kept.
+           Semantic vars remapped so every component inherits the theme. ══ */
+        --ink:#F0F2F5; --ink2:#C8D0D8; --ink3:#9BA6B2; --ink4:#6E7A88;
+        --rule:rgba(0,240,255,0.18); --bg:#0D1117; --white:#161B22; --black:#00F0FF;
+        --accent:#FF3366; --accent-light:rgba(255,51,102,0.14);
+        --warn:#FF3366; --yellow:#F1C40F; --blue:#00F0FF;
+        --hud:#080B10; --nav:#11161D; --navtab:#1A212B;
+        --gold:#00F0FF; --gold-dark:#00C0CC; --gold-pale:rgba(0,240,255,0.14);
+        --magenta:#BD00FF; --magenta-soft:#D98CFF;
+        --card-shadow:0 4px 18px rgba(0,0,0,0.55);
+        --glow-cyan:0 0 12px rgba(0,240,255,0.35);
+        --glow-magenta:0 0 14px rgba(189,0,255,0.4);
+        --sans:'Space Grotesk','IBM Plex Sans',sans-serif;
+        --mono:'JetBrains Mono','IBM Plex Mono',monospace;
+        --display:'Space Grotesk','Bebas Neue',sans-serif; --handwrite:'Caveat',cursive;
+        --r:8px;
+        /* Base sizing — mobile first, bumped up from the old 12px for readability */
+        --pad-x:16px; --pad-x-tight:12px; --fs-base:15px;
       }
+      /* Responsive type scale — larger on desktop */
       @media (min-width: 480px){
-        :root{ --pad-x:16px; --pad-x-tight:14px; }
+        :root{ --pad-x:20px; --pad-x-tight:16px; --fs-base:16px; }
       }
-
-      /* ══ DARK THEME (Neon) — volt lime / hot pink / cyan on near-black ══ */
-      body[data-skin="dark"]{
-        --ink:#FFFFFF; --ink2:#E0E0E0; --ink3:#A0A0A0; --ink4:#6E6E6E;
-        --rule:rgba(255,255,255,0.12); --bg:#121212; --white:#1E1E1E; --black:#000000;
-        --accent:#FF007F; --accent-light:rgba(255,0,127,0.12);
-        --warn:#FF007F; --yellow:#CCFF00; --blue:#00E5FF;
-        --hud:#0A0A0A; --nav:#1A1A1A; --navtab:#242424;
-        --gold:#CCFF00; --gold-dark:#A5CC00; --gold-pale:rgba(204,255,0,0.15);
-        --card-shadow:0 4px 16px rgba(0,0,0,0.5);
-        background:#121212;
+      @media (min-width: 900px){
+        :root{ --pad-x:24px; --fs-base:17px; }
       }
-      body[data-skin="dark"]{ color:#FFFFFF; }
-      body[data-skin="dark"] .card,
-      body[data-skin="dark"] [class*="card"]{
-        background:#1E1E1E; border-color:rgba(255,255,255,0.1);
+      body{ background:var(--bg); color:var(--ink); font-size:var(--fs-base); }
+      /* Arcade surface + accent treatments */
+      .card, [class*="card"]{
+        background:var(--white); border-color:var(--rule);
       }
-      body[data-skin="dark"] .btn-p{
-        background:#CCFF00; color:#000; box-shadow:0 0 12px rgba(204,255,0,0.35); border:none;
+      .btn-p{
+        background:#00F0FF; color:#0D1117; border:none; box-shadow:var(--glow-cyan); font-weight:700;
       }
-      body[data-skin="dark"] input,
-      body[data-skin="dark"] select,
-      body[data-skin="dark"] textarea{
-        background:#1E1E1E; color:#fff; border-color:rgba(255,255,255,0.15);
+      input, select, textarea{
+        background:#161B22; color:var(--ink); border-color:rgba(0,240,255,0.2);
       }
-      body[data-skin="dark"] select option{ background:#1E1E1E; color:#fff; }
-
-      /* ══ LIGHT THEME (Alpine) — deep green / flare orange / sky blue on off-white ══ */
-      body[data-skin="light"]{
-        --ink:#1A1A1A; --ink2:#0F4C43; --ink3:#637381; --ink4:#8B98A5;
-        --rule:#E2E8EC; --bg:#F4F6F8; --white:#FFFFFF; --black:#0F4C43;
-        --accent:#FF6B35; --accent-light:#FFF0EA;
-        --warn:#FF6B35; --yellow:#0F4C43; --blue:#4A90E2;
-        --hud:#0F4C43; --nav:#0F4C43; --navtab:#166054;
-        --gold:#F5C800; --gold-dark:#C49A00; --gold-pale:#FFF5B0;
-        --card-shadow:0 8px 24px rgba(15,76,67,0.08);
-        background:#F4F6F8;
-      }
-      body[data-skin="light"]{ color:#1A1A1A; }
-      body[data-skin="light"] .card,
-      body[data-skin="light"] [class*="card"]{
-        background:#FFFFFF; border-color:#E2E8EC;
-      }
-      body[data-skin="light"] .btn-p{
-        background:#0F4C43; color:#fff; border:none;
-      }
+      select option{ background:#161B22; color:var(--ink); }
+      /* Numbers/data in mono for that scoreboard feel */
+      .data-metric{ font-family:var(--mono); color:var(--yellow); }
 
       /* ── 8-bit skin overrides — applied when <body data-skin="8bit"> ── */
       body[data-skin="8bit"]{
@@ -6913,29 +6894,6 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
           </div>
         </div>
 
-        {/* Skin cycle button */}
-        <button
-          onClick={cycleSkin}
-          title={`Current: ${skinLabel} — click to cycle skins`}
-          style={{
-            background: "rgba(255,255,255,0.12)",
-            border: "1.5px solid rgba(255,255,255,0.3)",
-            borderRadius: 8,
-            color: "#fff",
-            fontSize: 11,
-            fontWeight: 700,
-            padding: "5px 12px",
-            cursor: "pointer",
-            letterSpacing: 0.3,
-            fontFamily: "var(--sans)",
-            boxShadow: "none",
-            transition: "all .2s",
-            flexShrink: 0,
-            lineHeight: 1.4,
-          }}>
-          {skinIcon} {skinLabel}
-        </button>
-
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:700,color:"var(--gold)",lineHeight:1}}>.99</div>
           <div style={{fontSize:8,color:"rgba(255,255,255,.55)",letterSpacing:.5,fontStyle:"italic"}}>always</div>
@@ -8080,19 +8038,14 @@ export default function App() {
   const [racePlan,       setRacePlanState]  = useState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
   const [nutritionLib,   setNutritionLib]   = useState([]); // persisted personal nutrition library
 
-  // Apply skin to <body data-skin="..."> and persist choice
+  // Single theme (Arcade) lives in :root — no per-skin body attribute needed.
   async function setSkin(s) {
     setSkinState(s);
-    document.body.setAttribute("data-skin", s);
-    try { await store.set("bep6_skin", s); } catch {}
   }
 
-  // Ensure the body always carries a valid theme. Defaults to dark (neon) and
-  // migrates any legacy skin names (default/8bit) to the two current themes.
+  // Ensure no legacy data-skin override is applied — the Arcade theme is in :root.
   useEffect(() => {
-    const valid = skin === "light" ? "light" : "dark";
-    if (valid !== skin) { setSkinState(valid); }
-    document.body.setAttribute("data-skin", valid);
+    document.body.removeAttribute("data-skin");
   }, [skin]);
 
   // ── Auth: check existing session on mount ──────────────────
@@ -8180,14 +8133,7 @@ export default function App() {
     try { const r = await store.get("bep6_overrides"); if (r) setSessionOverrides(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_slots");     if (r) setDaySlotOverrides(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_completions"); if (r) setCompletionMap(JSON.parse(r.value)); } catch {}
-    try {
-      const r = await store.get("bep6_skin");
-      if (r) {
-        const migrated = r.value === "light" ? "light" : "dark";
-        setSkinState(migrated);
-        document.body.setAttribute("data-skin", migrated);
-      }
-    } catch {}
+    document.body.removeAttribute("data-skin");
     try { const r = await store.get("bep6_racePlan");      if (r) setRacePlanState(JSON.parse(r.value)); } catch {}
     try { const r = await store.get("bep6_nutritionLib");  if (r) setNutritionLib(JSON.parse(r.value)); } catch {}
   }
