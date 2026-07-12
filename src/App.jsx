@@ -1839,17 +1839,26 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
     }
   }
 
-  // Tomorrow session — find next day's session in the current week
+  // Tomorrow session — find tomorrow's session in whichever week contains it.
+  // sessions is an object keyed by day id ({monday:{...},...}), NOT an array.
   const tomorrowSession = (() => {
-    const today = new Date(TODAY);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-    for (const week of plan) {
-      if (!week.sessions) continue;
-      const sess = week.sessions.find(s => s.date === tomorrowStr);
-      if (sess && sess.type !== "rest") return { ...sess, dayLabel: DAYS.find(d=>d.id===sess.day)?.label || "" };
-    }
+    try {
+      const tomorrow = new Date(TODAY);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tmrKey = tomorrow.getFullYear() + "-" + (tomorrow.getMonth()+1) + "-" + tomorrow.getDate();
+      for (const week of plan) {
+        if (!week || !week.sessions || !week.startDate) continue;
+        for (let idx = 0; idx < DAYS.length; idx++) {
+          const d = DAYS[idx];
+          const s = week.sessions[d.id];
+          if (!s || s.wtype === "rest") continue;
+          const cellDate = dayDate(week.startDate, idx);
+          if (!cellDate) continue;
+          const cellKey = cellDate.getFullYear() + "-" + (cellDate.getMonth()+1) + "-" + cellDate.getDate();
+          if (cellKey === tmrKey) return { ...s, dayLabel: d.label };
+        }
+      }
+    } catch {}
     return null;
   })();
 
@@ -1882,8 +1891,8 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
           <div>
             <span style={{fontWeight:700,opacity:.7,marginRight:6}}>Tomorrow</span>
             <span style={{fontWeight:700}}>{tomorrowSession.dayLabel} · {tomorrowSession.label}</span>
-            {tomorrowSession.km > 0 && (
-              <span style={{opacity:.7,marginLeft:6}}>· {tomorrowSession.km}km</span>
+            {tomorrowSession.distance > 0 && (
+              <span style={{opacity:.7,marginLeft:6}}>· {tomorrowSession.distance}km</span>
             )}
           </div>
         </div>
