@@ -5479,7 +5479,251 @@ function RaceModePanel({ race, strategy, validLegs }) {
   );
 }
 
-function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAdd, onNutritionLibRemove }) {
+// ─────────────────────────────────────────────────────────────
+//  RACE DAY LIVE VIEW — the "virtual crew"
+//  Glanceable, forward-looking. Shows the next aid station, distance,
+//  estimated time to reach it, and your race-day notes. Big advance
+//  button. Recalibrate by entering actual km covered.
+// ─────────────────────────────────────────────────────────────
+function RaceDayLiveView({ racePlan, onExit }) {
+  const race     = racePlan?.race || { title:"", legs:[] };
+  const strategy = racePlan?.strategy || DEFAULT_STRATEGY;
+  const legs     = (race.legs || []).filter(l => (parseFloat(l.km) || 0) > 0);
+
+  // Build cumulative distance markers for each aid station
+  const stations = (() => {
+    let cum = 0;
+    return legs.map((l, i) => {
+      cum += parseFloat(l.km) || 0;
+      return {
+        idx: i,
+        name: l.name || `Aid ${i + 1}`,
+        legKm: parseFloat(l.km) || 0,     // distance of this leg
+        cumKm: to99(cum),                  // total distance at this station
+        gainM: parseInt(l.gainM, 10) || 0,
+        note: l.raceNote || "",
+        stock: l.stock || "",
+      };
+    });
+  })();
+
+  const totalKm = stations.length ? stations[stations.length - 1].cumKm : 0;
+
+  // Pace: target hours over total distance → min per km (flat estimate)
+  const targetHours = parseFloat(strategy.targetHours) || 6;
+  const minPerKm    = totalKm > 0 ? (targetHours * 60) / totalKm : 7;
+
+  // Current position: index of the NEXT aid station the runner is heading to
+  const [nextIdx, setNextIdx] = useState(0);
+  const [showRecal, setShowRecal] = useState(false);
+  const [recalKm, setRecalKm] = useState("");
+
+  if (stations.length === 0) {
+    return (
+      <div style={{ padding:"var(--pad-x)", textAlign:"center", paddingTop:60 }}>
+        <div style={{ fontSize:40, marginBottom:16 }}>🏁</div>
+        <div style={{ fontFamily:"var(--display)", fontSize:22, letterSpacing:1, marginBottom:8 }}>
+          No aid stations set up yet
+        </div>
+        <div style={{ fontSize:14, color:"var(--ink3)", marginBottom:24 }}>
+          Add checkpoints in Event Setup first, then launch the Race Day view.
+        </div>
+        <button onClick={onExit} className="btn btn-p" style={{ padding:"12px 24px" }}>
+          ← Back to Event Setup
+        </button>
+      </div>
+    );
+  }
+
+  const done = nextIdx >= stations.length;
+  const next = done ? null : stations[nextIdx];
+
+  // Distance from previous station (or start) to the next one
+  const prevCum = nextIdx > 0 ? stations[nextIdx - 1].cumKm : 0;
+  const legDist = next ? to99(next.cumKm - prevCum) : 0;
+  const etaMin  = Math.round(legDist * minPerKm);
+  const etaStr  = etaMin >= 60
+    ? `${Math.floor(etaMin / 60)}h ${etaMin % 60}m`
+    : `${etaMin} min`;
+
+  // Recalibrate: given actual km covered, set nextIdx to the first station beyond it
+  function applyRecal() {
+    const km = parseFloat(recalKm);
+    if (isNaN(km)) { setShowRecal(false); return; }
+    let target = stations.length; // default: past the end
+    for (let i = 0; i < stations.length; i++) {
+      if (stations[i].cumKm > km) { target = i; break; }
+    }
+    setNextIdx(target);
+    setShowRecal(false);
+    setRecalKm("");
+  }
+
+  return (
+    <div style={{ minHeight:"calc(100vh - 60px)", background:"#0f2818", color:"white",
+      display:"flex", flexDirection:"column" }}>
+
+      {/* Top bar */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+        padding:"14px var(--pad-x)", borderBottom:"1px solid rgba(255,255,255,.12)" }}>
+        <button onClick={onExit}
+          style={{ background:"none", border:"none", color:"rgba(255,255,255,.7)",
+            fontSize:14, cursor:"pointer", fontWeight:600 }}>
+          ← Setup
+        </button>
+        <div style={{ fontSize:13, fontWeight:700, letterSpacing:.5, color:"rgba(255,255,255,.8)" }}>
+          {race.title || "Race Day"}
+        </div>
+        <div style={{ fontSize:12, color:"rgba(255,255,255,.5)", minWidth:60, textAlign:"right" }}>
+          {done ? "Done" : `${nextIdx + 1} / ${stations.length}`}
+        </div>
+      </div>
+
+      {done ? (
+        /* Finished */
+        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+          justifyContent:"center", padding:"var(--pad-x)", textAlign:"center" }}>
+          <div style={{ fontSize:64, marginBottom:20 }}>🎉</div>
+          <div style={{ fontFamily:"var(--display)", fontSize:34, letterSpacing:1, marginBottom:10 }}>
+            All aid stations done!
+          </div>
+          <div style={{ fontSize:16, color:"rgba(255,255,255,.7)", marginBottom:32 }}>
+            {totalKm}km covered. Finish strong. 🙌
+          </div>
+          <button onClick={() => setNextIdx(0)}
+            style={{ padding:"12px 24px", borderRadius:"var(--r)", border:"1px solid rgba(255,255,255,.3)",
+              background:"none", color:"white", fontSize:14, cursor:"pointer" }}>
+            ↺ Restart tracker
+          </button>
+        </div>
+      ) : (
+        /* Next aid station card */
+        <div style={{ flex:1, display:"flex", flexDirection:"column", padding:"24px var(--pad-x)" }}>
+
+          <div style={{ fontSize:13, fontWeight:700, letterSpacing:2, textTransform:"uppercase",
+            color:"var(--gold)", marginBottom:8 }}>
+            Next Aid Station
+          </div>
+
+          <div style={{ fontFamily:"var(--display)", fontSize:"clamp(30px,9vw,44px)",
+            letterSpacing:1, lineHeight:1.05, marginBottom:16 }}>
+            {next.name}
+          </div>
+
+          {/* Distance + ETA — the big glance numbers */}
+          <div style={{ display:"flex", gap:24, marginBottom:24 }}>
+            <div>
+              <div style={{ fontSize:"clamp(36px,12vw,56px)", fontWeight:800, lineHeight:1,
+                color:"var(--gold)" }}>
+                {legDist}<span style={{ fontSize:20, fontWeight:600 }}>km</span>
+              </div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,.5)", marginTop:4,
+                letterSpacing:1, textTransform:"uppercase" }}>ahead</div>
+            </div>
+            <div>
+              <div style={{ fontSize:"clamp(36px,12vw,56px)", fontWeight:800, lineHeight:1 }}>
+                ~{etaStr.replace(/ /g,"")}
+              </div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,.5)", marginTop:4,
+                letterSpacing:1, textTransform:"uppercase" }}>est. time</div>
+            </div>
+          </div>
+
+          {/* Race-day notes — the meat */}
+          {next.note ? (
+            <div style={{ background:"rgba(255,255,255,.08)", borderRadius:"var(--r)",
+              borderLeft:"4px solid var(--gold)", padding:"16px 18px", marginBottom:16 }}>
+              <div style={{ fontSize:12, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
+                color:"var(--gold)", marginBottom:8 }}>📋 At this aid</div>
+              <div style={{ fontSize:17, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
+                {next.note}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize:14, color:"rgba(255,255,255,.4)", fontStyle:"italic",
+              marginBottom:16 }}>
+              No notes for this aid station.
+            </div>
+          )}
+
+          {/* Stock + climb quick facts */}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:24 }}>
+            {next.stock && (
+              <div style={{ background:"rgba(255,255,255,.06)", borderRadius:20,
+                padding:"6px 14px", fontSize:13 }}>
+                🍌 {next.stock}
+              </div>
+            )}
+            {next.gainM > 0 && (
+              <div style={{ background:"rgba(212,150,10,.18)", borderRadius:20,
+                padding:"6px 14px", fontSize:13, color:"#ffcf70" }}>
+                ⛰ {next.gainM}m climb
+              </div>
+            )}
+          </div>
+
+          <div style={{ flex:1 }} />
+
+          {/* Big advance button */}
+          <button onClick={() => setNextIdx(i => i + 1)}
+            style={{ width:"100%", padding:"20px", borderRadius:"var(--r)", border:"none",
+              cursor:"pointer", background:"var(--gold)", color:"#0f2818",
+              fontSize:20, fontWeight:800, letterSpacing:.5, marginBottom:12,
+              boxShadow:"0 4px 16px rgba(0,0,0,.3)" }}>
+            ✓ Reached {next.name} →
+          </button>
+
+          {/* Recalibrate */}
+          <button onClick={() => setShowRecal(true)}
+            style={{ width:"100%", padding:"12px", borderRadius:"var(--r)",
+              border:"1px solid rgba(255,255,255,.25)", background:"none",
+              color:"rgba(255,255,255,.7)", fontSize:14, cursor:"pointer" }}>
+            ⚙ Lost? Recalibrate position
+          </button>
+        </div>
+      )}
+
+      {/* Recalibrate modal */}
+      {showRecal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:400,
+          display:"flex", alignItems:"center", justifyContent:"center", padding:"var(--pad-x)" }}
+          onClick={() => setShowRecal(false)}>
+          <div style={{ background:"#12331f", borderRadius:"var(--r)", padding:"24px",
+            width:"100%", maxWidth:400, border:"1px solid rgba(255,255,255,.15)" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>Recalibrate position</div>
+            <div style={{ fontSize:13, color:"rgba(255,255,255,.65)", marginBottom:16, lineHeight:1.5 }}>
+              Enter the total distance you've actually covered — we'll set your next aid
+              station accordingly.
+            </div>
+            <input type="number" min="0" step="0.1" value={recalKm} autoFocus
+              onChange={e => setRecalKm(e.target.value)}
+              placeholder="e.g. 24.5"
+              style={{ width:"100%", padding:"14px", fontSize:20, borderRadius:"var(--r)",
+                border:"1px solid rgba(255,255,255,.3)", background:"rgba(255,255,255,.05)",
+                color:"white", marginBottom:16, boxSizing:"border-box" }} />
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={() => setShowRecal(false)}
+                style={{ flex:1, padding:"12px", borderRadius:"var(--r)",
+                  border:"1px solid rgba(255,255,255,.25)", background:"none",
+                  color:"white", fontSize:14, cursor:"pointer" }}>
+                Cancel
+              </button>
+              <button onClick={applyRecal}
+                style={{ flex:2, padding:"12px", borderRadius:"var(--r)", border:"none",
+                  background:"var(--gold)", color:"#0f2818", fontSize:15, fontWeight:700,
+                  cursor:"pointer" }}>
+                Set position
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAdd, onNutritionLibRemove, onLaunchRaceDay }) {
   const { race = { title:"", date:"", legs:[] }, strategy = DEFAULT_STRATEGY } = racePlan || {};
 
   // ── helpers ──────────────────────────────────────────────
@@ -5633,11 +5877,24 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
 
       {/* ── Page title ── */}
       <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
-        Race Day
+        Event Setup
       </div>
-      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:20 }}>
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:16 }}>
         Build your course, load your vest, get your plan.
       </div>
+
+      {/* ── Launch Race Day live view ── */}
+      {validLegs.length > 0 && (
+        <button
+          onClick={() => onLaunchRaceDay && onLaunchRaceDay()}
+          style={{ width:"100%", padding:"16px", marginBottom:20, borderRadius:"var(--r)",
+            border:"none", cursor:"pointer", background:"#1a472a", color:"white",
+            fontSize:17, fontWeight:800, letterSpacing:.5, display:"flex",
+            alignItems:"center", justifyContent:"center", gap:10,
+            boxShadow:"0 3px 12px rgba(26,71,42,.3)" }}>
+          🏁 Launch Race Day View →
+        </button>
+      )}
 
       {/* ══ SECTION 1: Course Setup ══════════════════════════ */}
       <button
@@ -5909,6 +6166,14 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
               <input className="inp" placeholder="e.g. Water, Tailwind, bananas"
                 value={leg.stock || ""}
                 onChange={e => updateLeg(i, { stock: e.target.value })} />
+            </div>
+            <div style={{ gridColumn:"1 / -1" }}>
+              <label className="lbl">📋 Race-day notes (shown mid-race)</label>
+              <textarea className="inp" rows={3}
+                style={{ resize:"vertical", fontFamily:"inherit", lineHeight:1.5 }}
+                placeholder="What to do here + carry to next + heads-up. e.g. Refill 1.5L, grab 2 gels from drop. 3 gels before next aid. Big climb after — 400m gain."
+                value={leg.raceNote || ""}
+                onChange={e => updateLeg(i, { raceNote: e.target.value })} />
             </div>
           </div>
         </div>
@@ -6642,11 +6907,11 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
           {[
             {id:"plan",      label:"Plan"},
             {id:"tools",     label:"Tools"},
-            {id:"race",      label:"Race Day"},
+            {id:"race",      label:"Event Setup"},
             {id:"profile",   label:"Profile"},
           ].map(t => (
             <button key={t.id} onClick={() => onNav(t.id)}
-              className={`nav-tab${(screen === t.id || (t.id === "tools" && (screen === "fuel" || screen === "workouts" || screen === "pace"))) ? " active" : ""}`}>
+              className={`nav-tab${(screen === t.id || (t.id === "tools" && (screen === "fuel" || screen === "workouts" || screen === "pace")) || (t.id === "race" && screen === "raceday")) ? " active" : ""}`}>
               {t.label}
             </button>
           ))}
@@ -6657,6 +6922,96 @@ function Header({ screen, onNav, hasData, skin, setSkin, onFeedback, userEmail, 
 }
 
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  UI: Intro wizard — first-visit walkthrough of what the app does.
+//  4 quick slides. Dismissible; won't show again once seen.
+// ─────────────────────────────────────────────────────────────
+function IntroWizard({ onDone }) {
+  const slides = [
+    {
+      icon: "🏃",
+      title: "Build your plan",
+      body: "Answer a few quick questions and we'll build a personalised running plan — from getting back into it, to training for your next big race.",
+    },
+    {
+      icon: "🛠",
+      title: "Useful tools",
+      body: "Pace calculator, fuelling planner, workout builder and more — everything you need to train smarter, all in one place.",
+    },
+    {
+      icon: "🗺",
+      title: "Plan your event",
+      body: "Map out your race course aid station by aid station. Add what to grab, what to carry, and the climbs to watch for.",
+    },
+    {
+      icon: "🏁",
+      title: "Race your event",
+      body: "On race day, launch the live view — a big, glanceable virtual crew showing the next aid station, distance, timing and exactly what to do.",
+    },
+  ];
+
+  const [i, setI] = useState(0);
+  const last = i === slides.length - 1;
+  const s = slides[i];
+
+  return (
+    <div style={{ minHeight:"100vh", background:"var(--nav)", color:"white",
+      display:"flex", flexDirection:"column", padding:"var(--pad-x)" }}>
+
+      {/* Skip */}
+      <div style={{ display:"flex", justifyContent:"flex-end", paddingTop:12 }}>
+        <button onClick={onDone}
+          style={{ background:"none", border:"none", color:"rgba(255,255,255,.6)",
+            fontSize:14, cursor:"pointer", fontWeight:600 }}>
+          Skip →
+        </button>
+      </div>
+
+      {/* Slide body */}
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+        justifyContent:"center", textAlign:"center", maxWidth:440, margin:"0 auto" }}>
+        <div style={{ fontSize:72, marginBottom:24 }}>{s.icon}</div>
+        <div style={{ fontFamily:"var(--display)", fontSize:"clamp(30px,9vw,42px)",
+          letterSpacing:1, fontStyle:"italic", color:"var(--gold)", marginBottom:16, lineHeight:1.1 }}>
+          {s.title}
+        </div>
+        <div style={{ fontSize:17, lineHeight:1.6, color:"rgba(255,255,255,.85)" }}>
+          {s.body}
+        </div>
+      </div>
+
+      {/* Dots */}
+      <div style={{ display:"flex", justifyContent:"center", gap:8, marginBottom:24 }}>
+        {slides.map((_, idx) => (
+          <div key={idx} onClick={() => setI(idx)}
+            style={{ width: idx === i ? 24 : 8, height:8, borderRadius:4, cursor:"pointer",
+              background: idx === i ? "var(--gold)" : "rgba(255,255,255,.3)",
+              transition:"width .2s" }} />
+        ))}
+      </div>
+
+      {/* Nav buttons */}
+      <div style={{ display:"flex", gap:10, paddingBottom:32, maxWidth:440,
+        margin:"0 auto", width:"100%" }}>
+        {i > 0 && (
+          <button onClick={() => setI(i - 1)}
+            style={{ flex:1, padding:16, borderRadius:"var(--r)",
+              border:"1px solid rgba(255,255,255,.25)", background:"none",
+              color:"white", fontSize:15, cursor:"pointer" }}>
+            ← Back
+          </button>
+        )}
+        <button onClick={() => last ? onDone() : setI(i + 1)}
+          style={{ flex:2, padding:16, borderRadius:"var(--r)", border:"none",
+            background:"var(--gold)", color:"var(--nav)", fontSize:16, fontWeight:800,
+            letterSpacing:.5, cursor:"pointer" }}>
+          {last ? "Let's go →" : "Next →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 //  UI: Welcome screen
 // ─────────────────────────────────────────────────────────────
 function WelcomeScreen({ onStart, onSignIn, signedIn, noPlanFound }) {
@@ -7661,6 +8016,10 @@ export default function App() {
   const [authReady,      setAuthReady]      = useState(false);  // true once we've checked session
   const [authed,         setAuthed]         = useState(false);  // true if logged in
   const [showAuth,       setShowAuth]       = useState(false);  // optional sign-in overlay
+  const [showIntro,      setShowIntro]      = useState(() => {
+    // First-visit intro wizard — show unless previously dismissed on this device.
+    try { return localStorage.getItem("bep6_intro_seen") !== "1"; } catch { return true; }
+  });
   const [userEmail,      setUserEmail]      = useState(null);
   const [screen,         setScreen]         = useState("welcome");
   const [profile,        setProfile]        = useState(null);
@@ -7864,6 +8223,16 @@ export default function App() {
       </div>
     </div></>
   );
+
+  // First-visit intro wizard — only for brand-new users (no saved plan) and only
+  // once auth has been checked so it doesn't flash for returning users.
+  function dismissIntro() {
+    try { localStorage.setItem("bep6_intro_seen", "1"); } catch {}
+    setShowIntro(false);
+  }
+  if (showIntro && authReady && !profile && !showAuth) {
+    return <IntroWizard onDone={dismissIntro} />;
+  }
 
   // Optional sign-in overlay — app is usable without it (data saved on-device)
   if (showAuth) return <AuthScreen onAuth={handleAuthSuccess} onSkip={() => setShowAuth(false)} skin={skin} />;
@@ -8413,6 +8782,14 @@ export default function App() {
             nutritionLib={nutritionLib}
             onNutritionLibAdd={handleNutritionLibAdd}
             onNutritionLibRemove={handleNutritionLibRemove}
+            onLaunchRaceDay={() => setScreen("raceday")}
+          />
+        )}
+
+        {screen === "raceday" && hasData && (
+          <RaceDayLiveView
+            racePlan={racePlan}
+            onExit={() => setScreen("race")}
           />
         )}
 
