@@ -135,7 +135,7 @@ const HORSE_FOOTER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYA
 
 // Skin cycle order — add new skins here to make them available in rotation.
 // "surprise" skins will be added here when ready.
-const SKINS = ["default", "8bit", "dark", "socceroos"];
+const SKINS = ["default", "8bit", "dark"];
 
 function loadPixelFont() {
   if (document.getElementById("pixel-font-link")) return;
@@ -1935,16 +1935,14 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
           ) : (
             <>
               <div style={{textAlign:"center",minWidth:54}}>
-                <div style={{fontSize:26,fontWeight:800,lineHeight:1,fontFamily:"var(--mono)"}}>{countdown.daysOut}</div>
-                <div style={{fontSize:9,fontWeight:700,letterSpacing:1,textTransform:"uppercase",opacity:.8,marginTop:2}}>day{countdown.daysOut===1?"":"s"} to go</div>
+                <div style={{fontSize:26,fontWeight:800,lineHeight:1,fontFamily:"var(--mono)"}}>{Math.ceil(countdown.daysOut / 7)}</div>
+                <div style={{fontSize:9,fontWeight:700,letterSpacing:1,textTransform:"uppercase",opacity:.8,marginTop:2}}>week{Math.ceil(countdown.daysOut / 7)===1?"":"s"} to go</div>
               </div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",opacity:.8}}>Next event</div>
                 <div style={{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{countdown.eventName}</div>
                 <div style={{fontSize:11,opacity:.85,marginTop:1}}>
-                  {countdown.weeksOut > 0 ? `${countdown.weeksOut} week${countdown.weeksOut===1?"":"s"}` : ""}
-                  {countdown.weeksOut > 0 && countdown.extraDays > 0 ? " · " : ""}
-                  {countdown.extraDays > 0 || countdown.weeksOut === 0 ? `${countdown.extraDays || countdown.daysOut} day${(countdown.extraDays||countdown.daysOut)===1?"":"s"}` : ""}
+                  {countdown.daysOut} day{countdown.daysOut===1?"":"s"} away
                 </div>
               </div>
               {onNav && <div style={{fontSize:16,opacity:.5}}>›</div>}
@@ -8137,14 +8135,6 @@ export default function App() {
       if (r) {
         setSkinState(r.value);
         document.body.setAttribute("data-skin", r.value);
-      } else {
-        // Auto-apply Socceroos skin during FIFA World Cup 2026
-        // Tournament ends 19 July 2026
-        const worldCupEnd = new Date("2026-07-19T23:59:59");
-        if (new Date() <= worldCupEnd) {
-          setSkinState("socceroos");
-          document.body.setAttribute("data-skin", "socceroos");
-        }
       }
     } catch {}
     try { const r = await store.get("bep6_racePlan");      if (r) setRacePlanState(JSON.parse(r.value)); } catch {}
@@ -8500,22 +8490,6 @@ export default function App() {
       <div style={{minHeight:"100vh",background:"var(--bg)",maxWidth:720,margin:"0 auto"}}>
         <Header screen={screen} onNav={s => { setSelWeek(null); setScreen(s); }}
           hasData={hasData} skin={skin} setSkin={setSkin} onFeedback={() => setFeedbackOpen(true)} userEmail={userEmail} onLogout={handleLogout} onSignIn={() => setShowAuth(true)}/>
-
-        {/* ── World Cup 2026 Socceroos banner — time-limited until 19 Jul 2026 ── */}
-        {skin === "socceroos" && (() => {
-          const worldCupEnd = new Date("2026-07-19T23:59:59");
-          if (new Date() > worldCupEnd) return null;
-          return (
-            <div style={{ background:"#006633", color:"#FFD700", fontSize:11, fontWeight:700,
-              letterSpacing:.8, textTransform:"uppercase", textAlign:"center",
-              padding:"6px var(--pad-x)", display:"flex", alignItems:"center",
-              justifyContent:"center", gap:8 }}>
-              <span>⚽</span>
-              <span>FIFA World Cup 2026 — Go Socceroos!</span>
-              <span>⚽</span>
-            </div>
-          );
-        })()}
 
         {screen === "welcome" && (
           <WelcomeScreen
