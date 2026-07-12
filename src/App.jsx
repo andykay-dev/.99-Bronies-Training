@@ -985,6 +985,9 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
               {session.estMins > 0 && (
                 <div style={{fontSize:10,color:"var(--ink4)"}}>{fmtDuration(session.estMins)}</div>
               )}
+              {session.estMins > 90 && (
+                <div title="Over 90min — take fuel on this run" style={{fontSize:14}}>🍽️</div>
+              )}
               {!isRest && <div style={{fontSize:11,color:"var(--ink4)"}}>{open?"▲":"▼"}</div>}
             </div>
           </div>
@@ -1500,6 +1503,13 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
           <div style={{background:"rgba(0,240,255,0.10)",border:"1px solid #4CAF50",
             borderRadius:"var(--r)",padding:"8px 12px",fontSize:12,color:"#2E7D32",
             marginBottom:12,lineHeight:1.5}}>{week.note}</div>
+        )}
+        {DAYS.some(d => (week.sessions?.[d.id]?.estMins || 0) > 90) && (
+          <div style={{background:"var(--gold-pale)",border:"1px solid var(--gold-dark)",
+            borderRadius:"var(--r)",padding:"8px 12px",fontSize:12,color:"var(--gold-dark)",
+            fontWeight:700,marginBottom:12,lineHeight:1.5}}>
+            🍽️ Long run this week — practice your fuelling plan 🍔🍩
+          </div>
         )}
         {week.volumeWarning && (
           <div style={{background:"#fff8e0",border:"2px solid #d4800a",borderRadius:"var(--r)",
@@ -4967,6 +4977,20 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
             <div style={{ fontSize:13, color:"var(--ink)", lineHeight:1.5 }}>{plan.carbsNote}</div>
           </div>
 
+          {/* Fuelling caution — high carb rate needs a trained gut */}
+          {plan.carbRate >= 65 && (
+            <div style={{ padding:"10px 14px", background:"rgba(241,196,15,0.12)",
+              borderLeft:"3px solid #E07A00", borderRadius:"var(--r)", marginBottom:12,
+              display:"flex", alignItems:"flex-start", gap:8 }}>
+              <div style={{ fontSize:16, flexShrink:0 }}>⚠️</div>
+              <div style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.6 }}>
+                <strong style={{ color:"#C06000" }}>Be careful with this fuelling.</strong> {plan.carbRate}g/hr
+                is a race-day rate — if that isn't normal for you, your gut may not thank you. Try it on a
+                training run first, or you could be in for a rough one 💩🤮.
+              </div>
+            </div>
+          )}
+
           {/* Fuel timings */}
           {plan.timings.length > 0 && (
             <div style={{ marginBottom:12 }}>
@@ -6267,6 +6291,18 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
           <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:700,
             color:"var(--ink)", lineHeight:1 }}>{plan.peakFlasks}</div>
           <div style={{ fontSize:10, color:"var(--ink4)", marginTop:2 }}>on the hardest leg</div>
+        </div>
+      </div>
+
+      {/* ── Fuelling caution — race pace targets full carb rate, which needs a trained gut ── */}
+      <div style={{ padding:"10px 14px", background:"rgba(241,196,15,0.12)",
+        borderLeft:"3px solid #E07A00", borderRadius:"var(--r)", marginBottom:16,
+        display:"flex", alignItems:"flex-start", gap:8 }}>
+        <div style={{ fontSize:16, flexShrink:0 }}>⚠️</div>
+        <div style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.6 }}>
+          <strong style={{ color:"#C06000" }}>Be careful with this fuelling.</strong> It's set to a race-day
+          carb rate — if that isn't a normal amount for you, your gut may not thank you. Practise this exact
+          plan on a long training run before race day, or you could be in for a rough one 💩🤮.
         </div>
       </div>
 
