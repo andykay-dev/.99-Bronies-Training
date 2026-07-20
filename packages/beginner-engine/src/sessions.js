@@ -26,6 +26,8 @@ export function parseTargetKm(targetDistance, targetDistanceKm) {
 
 /** Map timeline preset to weeks. */
 export function parseTimeline(timeline) {
+  const m = /^(\d+)w$/.exec(timeline || "");
+  if (m) return Math.max(2, Math.min(30, parseInt(m[1], 10)));
   return TIMELINE_MAP[timeline] || 12;
 }
 
@@ -107,5 +109,45 @@ export function restSession() {
     summary: "Complete rest",
     detail: "Full rest. Sleep, eat well, hydrate.",
     garmin: ["No workout today."],
+  };
+}
+
+/**
+ * Race-day session for a beginner plan anchored to a real event.
+ * If the race distance exceeds what training could safely build to
+ * (longestTrained × cap), the strategy is explicit run/walk from the gun —
+ * the standard, safe way for a beginner to cover a fun-run distance beyond
+ * their longest training run, rather than pretending the gap isn't there.
+ */
+export function buildRaceDaySession(goalKm, ep, raceName, longestTrained) {
+  const d = Math.round(goalKm * 10) / 10;
+  const mins = Math.round((d * ep) / 60);
+  const beyondTraining = longestTrained > 0 && d > longestTrained * 1.1;
+  const name = raceName || "Race Day";
+
+  const strategy = beyondTraining
+    ? `Your longest training run was ${Math.round(longestTrained*10)/10}km — today is longer, and that's fine. ` +
+      `Plan walk breaks from the START, not when you're forced to: run 9min / walk 1min from the gun. ` +
+      `Starting the walk breaks early is what gets you to the finish feeling strong instead of surviving.\n\n`
+    : `You've run this distance in training — today is just doing it with a crowd and a bib on.\n\n`;
+
+  return {
+    wtype: "long",
+    label: `🎉 ${name} — ${d}km`,
+    distance: d,
+    estMins: mins,
+    summary: `RACE DAY · ${d}km · start slow, finish smiling`,
+    detail:
+      `🎉 It's race day: ${name}.\n\n` +
+      strategy +
+      `Go out SLOWER than feels right — the crowd will drag you out fast, don't let it. ` +
+      `First half comfortable, second half is where you pass people.\n\n` +
+      `Eat a normal breakfast 90min+ before. Nothing new today — no new shoes, no new food.\n\n` +
+      `Cross that line and soak it up. This is what the whole plan was for.`,
+    garmin: [
+      `Distance: ${d}km | Conversational start`,
+      beyondTraining ? `Run 9:00 / Walk 1:00 — repeat from the start` : `Even effort — negative split if it feels good`,
+      `Auto Lap every 1km`,
+    ],
   };
 }

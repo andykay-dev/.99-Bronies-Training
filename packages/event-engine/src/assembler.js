@@ -11,7 +11,7 @@ import {
   dateFromAnchor, weeksBetween, computeFeedbackAdj, todaySydney,
   DAYS,
 } from "@bronies/engine-core";
-import { WORKOUT_SUBTYPES, DEFAULT_DAY_PLAN } from "./constants.js";
+import { WORKOUT_SUBTYPES, DEFAULT_DAY_PLAN, SESSION_CAP_RATIO } from "./constants.js";
 import {
   getPhase, peakLongRunWeeks, computeDownWeeks, computeLongKm,
 } from "./scheduler.js";
@@ -301,6 +301,15 @@ function buildEventPlan(profile, event, dayPlan, fb) {
   const maxLong     = longRunCap(isTrail, distNum, paces.ep);
   const peakWeeks   = peakLongRunWeeks(distNum, trainingWks);
 
+  // Fitness anchoring: if the profile says how far this runner can actually
+  // run today, every long run is capped at longest-so-far × SESSION_CAP_RATIO
+  // and the ramp builds from their real base. Absent the field (older
+  // profiles), behaviour is unchanged.
+  const anchoredStart = parseFloat(profile.currentLongestKm) > 0
+    ? parseFloat(profile.currentLongestKm)
+    : null;
+  let longestSoFar = anchoredStart;
+
   const { downWeeks, interPeakDownWeeks, postPeakDownWeeks } =
     computeDownWeeks(peakWeeks, trainingWks, total);
 
@@ -338,10 +347,25 @@ function buildEventPlan(profile, event, dayPlan, fb) {
     }
 
     // ── Long run distance ────────────────────────────────────
-    const longKm = computeLongKm({
+    let longKm = computeLongKm({
       wn, pct, phase, isPeakLong, isDown, isInterPeakDown, isPostPeakDown,
       isTaper, taperWkIdx, maxLong, distNum, gm, fbAdj, peakWeeks,
     });
+
+    // Fitness-anchored single-session cap (see constants.js). Build/peak
+    // weeks may grow to anchor × ratio; recovery, down, and taper weeks
+    // clamp to BELOW the anchor (85%) so they genuinely recover — without
+    // this, the engine's distance-based recovery floors can exceed the cap
+    // and leave "down" weeks longer than the build weeks around them.
+    let capBound = false;
+    if (longestSoFar !== null) {
+      const isReduced = isDown || isInterPeakDown || isPostPeakDown || isTaper;
+      const cap = isReduced
+        ? Math.round(longestSoFar * 0.85 * 10) / 10
+        : Math.round(longestSoFar * SESSION_CAP_RATIO * 10) / 10;
+      if (longKm > cap) { longKm = Math.round(cap); capBound = true; }
+      if (!isReduced) longestSoFar = Math.max(longestSoFar, longKm);
+    }
 
     // ── Build each day ───────────────────────────────────────
     const sessions = {};
@@ -376,8 +400,12 @@ function buildEventPlan(profile, event, dayPlan, fb) {
       ? "📉 Taper begins — volume drops but intensity stays."
       : isTaper && taperWkIdx >= 2
       ? "📉 Final taper — legs should feel restless. That's the point."
+      : isPeakLong && capBound
+      ? "⭐ Peak long run — capped to build safely from your current base rather than the textbook distance. A shorter peak you arrive at healthy beats a longer one that breaks you."
       : isPeakLong
       ? "⭐ Peak long run — confidence-builder. Time on feet, conversational pace."
+      : capBound
+      ? "🛡 Long run held back this week — growing no more than ~10% past your longest so far. The ramp catches up; your tendons will thank you."
       : "";
 
     const longSession = Object.values(sessions).find(s => s?.wtype === "long");

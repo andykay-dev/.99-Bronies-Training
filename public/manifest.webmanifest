@@ -4,8 +4,8 @@
   "description": "Embrace the .99 chaos — periodised training plans for the crew",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1A3060",
-  "theme_color": "#1A3060",
+  "background_color": "#0D1117",
+  "theme_color": "#0D1117",
   "orientation": "portrait",
   "icons": [
     {

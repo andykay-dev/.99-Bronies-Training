@@ -11,12 +11,39 @@ Sentry.init({
   replaysOnErrorSampleRate: 1.0,
   integrations: [
     new BrowserTracing(),
-    new Sentry.Replay({ maskAllText: false, blockAllMedia: false }),
+    // maskAllText: true — replays capture layout/colour/structure (still useful for
+    // debugging visual bugs) but blank out actual characters, since sessions can include
+    // the user's email (header) and free-text race/training notes.
+    new Sentry.Replay({ maskAllText: true, blockAllMedia: false }),
   ],
 });
 
+function ErrorFallback() {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center",
+      background: "#0D1117", color: "#F0F2F5", fontFamily: "sans-serif" }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>😵</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+        Something broke
+      </div>
+      <div style={{ fontSize: 14, color: "#9BA6B2", marginBottom: 24, maxWidth: 320 }}>
+        This has been reported automatically. Reloading usually fixes it.
+      </div>
+      <button onClick={() => window.location.reload()}
+        style={{ padding: "12px 24px", borderRadius: 8, border: "none",
+          background: "#00F0FF", color: "#0D1117", fontWeight: 700, fontSize: 14,
+          cursor: "pointer" }}>
+        Reload
+      </button>
+    </div>
+  );
+}
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
+      <App />
+    </Sentry.ErrorBoundary>
   </StrictMode>,
 )

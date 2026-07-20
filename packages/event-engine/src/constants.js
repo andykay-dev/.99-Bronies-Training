@@ -27,6 +27,16 @@ export const DEFAULT_WORKOUT_MINUTES = {
 // Workout subtypes — treated as "workout" for planning but force a session type.
 export const WORKOUT_SUBTYPES = ["hills", "fartlek", "intervals", "tempo"];
 
+// ── Single-session progression cap ─────────────────────────────
+// Same evidence base as the beginner engine (Frandsen/Nielsen et al. 2025,
+// Br J Sports Med, 5,205 runners): a single session exceeding ~10% of the
+// runner's longest recent run was the strongest overuse-injury predictor —
+// far stronger than week-to-week volume change. When the profile provides
+// currentLongestKm, no prescribed long run may exceed the longest run so
+// far × this ratio; the ramp builds from the runner's actual base instead
+// of jumping to a race-distance-derived start.
+export const SESSION_CAP_RATIO = 1.10;
+
 // Phase boundaries (fraction of total training weeks).
 //   ≤ base  → BASE
 //   ≤ build → BUILD

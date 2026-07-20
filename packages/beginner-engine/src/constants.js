@@ -14,6 +14,8 @@ export const CURRENT_KM_MAP = {
 };
 
 // Target-distance preset → km (free-form number overrides these)
+// Target preset → km. Goals above BEGINNER_HANDOFF_KM aren't rejected —
+// they trigger the two-stage journey (base here, event engine after).
 export const TARGET_KM_MAP = {
   parkrun:   5,
   brownie:   7.99,
@@ -21,6 +23,12 @@ export const TARGET_KM_MAP = {
   city2surf: 14,
   half:      21,
 };
+
+// Handoff point: goals up to this distance are handled entirely by this
+// engine; bigger goals become a two-stage journey — this engine builds the
+// base to 10km, then the event engine (fitness-anchored) carries on to the
+// real goal. Not a clamp: daunting goals are welcome, they just get staged.
+export const BEGINNER_HANDOFF_KM = 10;
 
 // Timeline preset → weeks
 export const TIMELINE_MAP = {
@@ -44,6 +52,24 @@ export const BEGINNER_PACE = {
   min: 330,  // 5:30/km
   max: 540,  // 9:00/km
 };
+
+// ── Frequency & single-session progression ──────────────────────
+// Grounded in:
+//  - Frandsen/Nielsen et al. 2025, Br J Sports Med (5,205 runners, 87
+//    countries, 588,071 Garmin-logged sessions): the strongest predictor of
+//    overuse injury was a single session exceeding ~10% of the runner's
+//    longest run in the trailing 30 days (10–30% over → 64% higher injury
+//    rate); week-to-week volume change showed no significant relationship.
+//    This is why the cap below is per-SESSION, not per-week.
+//  - ACSM guidance: novice runners start at 2–3 days/week, building to 4–5
+//    with experience.
+//  - Standard coaching practice for adding a run day (Gaudette / Runner's
+//    World): introduce a new day short and easy — about half a normal easy
+//    day — hold it for a few weeks before building it up, rather than
+//    adding full-size sessions on new days immediately.
+export const SINGLE_SESSION_CAP_RATIO = 1.10; // a session may not exceed 110% of the longest run so far
+export const FREQUENCY_STEP_WEEKS     = 3;    // wait this many weeks before adding another run day
+export const NEW_DAY_RATIO            = 0.5;  // a newly-added day starts at ~50% of that week's peak session
 
 // Fraction of plan spent in walk/run before switching to continuous running.
 export const WALK_RUN_FRACTION = 0.4;
