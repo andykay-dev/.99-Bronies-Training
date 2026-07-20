@@ -4357,6 +4357,12 @@ function BronieToolsScreen({ onNav }) {
       title: "Pace Calculator",
       desc:  "Convert between pace, speed and finish time. Great for race-week planning — figure out your splits from a target time or work backwards from a distance.",
     },
+    {
+      id:    "links",
+      icon:  "🔗",
+      title: "Links",
+      desc:  "Quick shortcuts — Strava .99rc, route planning, race finder and the good running shops.",
+    },
   ];
 
   return (
@@ -4395,16 +4401,46 @@ function BronieToolsScreen({ onNav }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  LINKS SCREEN
-//  Categorised external shortcuts — Strava, route planning, race
-//  finder, shopping. All open in a new tab.
+//  LINKS SCREEN — lives under Tools.
+//  Small square tiles, grouped. Shopping tiles show each site's own
+//  favicon (via Google's favicon service — no CORS issues in an <img>),
+//  falling back to the emoji if the favicon fails to load.
 // ─────────────────────────────────────────────────────────────
-function LinksScreen() {
+function LinkTile({ link }) {
+  const [iconFailed, setIconFailed] = useState(false);
+  const domain = link.favicon ? (link.faviconDomain || new URL(link.url).hostname) : null;
+  const showImg = domain && !iconFailed;
+  return (
+    <a href={link.url} target="_blank" rel="noopener noreferrer"
+      style={{ width:76, textDecoration:"none", display:"flex", flexDirection:"column",
+        alignItems:"center", gap:6 }}>
+      <div style={{ width:64, height:64, borderRadius:14, background:"var(--white)",
+        border:"1px solid var(--rule)", display:"flex", alignItems:"center",
+        justifyContent:"center", boxShadow:"0 2px 8px rgba(0,0,0,.25)" }}>
+        {showImg ? (
+          <img
+            src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+            alt="" width={34} height={34}
+            style={{ borderRadius:8 }}
+            onError={() => setIconFailed(true)} />
+        ) : (
+          <span style={{ fontSize:28, lineHeight:1 }}>{link.icon}</span>
+        )}
+      </div>
+      <div style={{ fontSize:10, fontWeight:700, color:"var(--ink2)", textAlign:"center",
+        lineHeight:1.25, wordBreak:"break-word" }}>
+        {link.label}
+      </div>
+    </a>
+  );
+}
+
+function LinksScreen({ onBack }) {
   const CATEGORIES = [
     {
       title: "Strava",
       links: [
-        { label:"Open Strava", icon:"🟠", url:"https://strava.app.link/ulrXR3TIT4b" },
+        { label:".99rc", icon:"🟠", favicon:true, faviconDomain:"strava.com", url:"https://strava.app.link/ulrXR3TIT4b" },
       ],
     },
     {
@@ -4416,23 +4452,25 @@ function LinksScreen() {
     {
       title: "Race Finder",
       links: [
-        { label:"Running Calendar (AU)", icon:"🏁", url:"https://www.runningcalendar.com.au/" },
+        { label:"Running Calendar", icon:"🏁", favicon:true, url:"https://www.runningcalendar.com.au/" },
       ],
     },
     {
       title: "Shopping",
       links: [
-        { label:"Running Warehouse AU", icon:"🛒", url:"https://www.runningwarehouse.com.au/?ctype=mrun" },
-        { label:"The Trail Co",         icon:"🛒", url:"https://www.thetrail.co/" },
-        { label:"Pace Athletic",        icon:"🛒", url:"https://www.paceathletic.com/" },
-        { label:"Wild Earth",           icon:"🛒", url:"https://www.wildearth.com.au/" },
-        { label:"The Athlete's Foot AU",icon:"🛒", url:"https://www.theathletesfoot.com.au/" },
+        { label:"Running Warehouse", icon:"🛒", favicon:true, url:"https://www.runningwarehouse.com.au/?ctype=mrun" },
+        { label:"The Trail Co",      icon:"🛒", favicon:true, url:"https://www.thetrail.co/" },
+        { label:"Pace Athletic",     icon:"🛒", favicon:true, url:"https://www.paceathletic.com/" },
+        { label:"Wild Earth",        icon:"🛒", favicon:true, url:"https://www.wildearth.com.au/" },
+        { label:"Athlete's Foot",    icon:"🛒", favicon:true, url:"https://www.theathletesfoot.com.au/" },
       ],
     },
   ];
 
   return (
     <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
+      <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer",
+        color:"var(--ink3)", fontSize:13, padding:"0 0 12px 0" }}>← Tools</button>
       <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
         Links
       </div>
@@ -4441,28 +4479,11 @@ function LinksScreen() {
       </div>
 
       {CATEGORIES.map(cat => (
-        <div key={cat.title} style={{ marginBottom:24 }}>
+        <div key={cat.title} style={{ marginBottom:22 }}>
           <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
             textTransform:"uppercase", marginBottom:10 }}>{cat.title}</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {cat.links.map(link => (
-              <a
-                key={link.url}
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="card"
-                style={{ padding:"14px 16px", textAlign:"left", cursor:"pointer", width:"100%",
-                  border:"1px solid var(--rule)", background:"var(--white)", textDecoration:"none",
-                  borderRadius:"var(--r)", display:"flex", alignItems:"center", gap:14,
-                  boxSizing:"border-box" }}>
-                <div style={{ fontSize:22, lineHeight:1, flexShrink:0 }}>{link.icon}</div>
-                <div style={{ flex:1, minWidth:0, fontSize:14, fontWeight:700, color:"var(--ink)" }}>
-                  {link.label}
-                </div>
-                <div style={{ fontSize:14, color:"var(--ink4)", flexShrink:0 }}>↗</div>
-              </a>
-            ))}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:12 }}>
+            {cat.links.map(link => <LinkTile key={link.url} link={link} />)}
           </div>
         </div>
       ))}
@@ -6912,7 +6933,6 @@ function Header({ screen, onNav, hasData, onFeedback, userEmail, onLogout, onSig
             {id:"plan",      label:"Plan"},
             {id:"tools",     label:"Tools"},
             {id:"race",      label:"Event Setup"},
-            {id:"links",     label:"Links"},
             {id:"profile",   label:"Profile"},
           ].map(t => (
             <button key={t.id} onClick={() => onNav(t.id)}
@@ -8774,7 +8794,7 @@ export default function App() {
         )}
 
         {screen === "links" && hasData && (
-          <LinksScreen />
+          <LinksScreen onBack={() => setScreen("tools")} />
         )}
 
         {screen === "race" && hasData && (
