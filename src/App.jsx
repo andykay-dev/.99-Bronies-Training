@@ -5,7 +5,7 @@ import React, { useState, useEffect } from "react";
 // ─────────────────────────────────────────────────────────────
 import {
   parseTime, fmtPace, fmtDuration, fmtDate, parseLocalDate,
-  weekStatus, dayDate, derivePaces,
+  weekStatus, dayDate, derivePaces, dateFromAnchor,
   elevationGuide, bucketElevation,
   DAYS, PHASES, RACE_DISTANCES, TRAINING_GOALS,
   SLOT_TYPES,
@@ -22,6 +22,7 @@ import {
 import {
   generateBeginnerPlan,
   parseCurrentKm, parseTargetKm, parseTimeline,
+  SINGLE_SESSION_CAP_RATIO, BEGINNER_HANDOFF_KM,
 } from "@bronies/beginner-engine";
 
 import {
@@ -351,9 +352,102 @@ function dayIsToday(weekStartDate, dayIndex) {
 // ─────────────────────────────────────────────────────────────
 //  PLAN BUILDER — routes to the correct engine
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Two-stage journey for a big beginner goal (> BEGINNER_HANDOFF_KM):
+ *   Stage 1 — beginner engine: current base → 10km, sized to however many
+ *     weeks that safely takes (searched, not preset).
+ *   Stage 2 — event engine, fitness-anchored at currentLongestKm = 10:
+ *     10km → the real goal, with its own peaks/downs/taper/race week.
+ * Stitched into one continuous Week[] — continuous week numbers and dates,
+ * a graduation note at the transition, and the celebration held back until
+ * the true final goal (not the 10km milestone).
+ */
+function buildJourneyPlan(profile, feedbackMap) {
+  const goalKm = parseTargetKm(profile.targetDistance, profile.targetDistanceKm);
+  const anchor = profile.planStartDate || todaySydneyStr();
+  const startKm = parseCurrentKm(profile.currentLongest);
+
+  // ── Stage 1: base → 10km (skipped if they're already there) ──
+  let stage1 = [];
+  if (startKm < BEGINNER_HANDOFF_KM) {
+    const s1Profile = {
+      ...profile,
+      targetDistance: "10k", targetDistanceKm: "",
+      raceDate: "", raceName: "",           // the race (if any) belongs to stage 2
+      planStartDate: anchor,
+    };
+    // Smallest week-count whose plan actually reaches the 10km goal week —
+    // searched against the real engine so it always matches what's prescribed.
+    for (let wks = 6; wks <= 26; wks++) {
+      const candidate = generateBeginnerPlan({ ...s1Profile, timeline: `${wks}w` }, feedbackMap);
+      if (candidate.length && candidate[candidate.length - 1].isPeakLong) { stage1 = candidate; break; }
+      if (wks === 26) stage1 = candidate; // safety net — honest fell-short notes handle it
+    }
+  }
+  const s1Weeks = stage1.length;
+
+  // ── Stage 2: 10km → goal, via the fitness-anchored event engine ──
+  const s2Anchor = s1Weeks > 0 ? dateFromAnchor(anchor, s1Weeks) : anchor;
+  let eventDate = profile.raceDate || "";
+  if (!eventDate) {
+    // No fixed date — synthesize one from how long the 10→goal ramp needs
+    // (10%/exposure growth toward ~90% of goal, inflated for down weeks + taper).
+    const growthWeeks = Math.ceil(Math.log(Math.max(1.01, (goalKm * 0.9) / BEGINNER_HANDOFF_KM)) / Math.log(1.10));
+    const s2Span = Math.max(8, Math.min(24, Math.round(growthWeeks * 1.5) + 4));
+    eventDate = dateFromAnchor(s2Anchor, s2Span);
+  }
+  const s2Event = {
+    name: profile.raceName || `Your ${goalKm}km goal`,
+    date: eventDate,
+    distance: `${goalKm}km`,
+    type: "road",
+  };
+  const s2Profile = {
+    ...profile,
+    planStartDate: s2Anchor,
+    currentLongestKm: String(BEGINNER_HANDOFF_KM), // the anchor: stage 1 built exactly this base
+  };
+  // Feedback keys are absolute week numbers — shift them into stage-2-local numbering.
+  const s2Feedback = {};
+  Object.entries(feedbackMap || {}).forEach(([wn, v]) => {
+    const local = parseInt(wn, 10) - s1Weeks;
+    if (local >= 1) s2Feedback[local] = v;
+  });
+  const stage2 = generatePlan(s2Profile, s2Event, s2Feedback).map((w, i) => ({
+    ...w,
+    weekNum: w.weekNum + s1Weeks,
+    ...(i === 0 ? {
+      note: `🎓 Graduation — base built, the full training engine takes it from here. Next stop: ${goalKm}km.` +
+        (w.note ? `\n${w.note}` : ""),
+    } : {}),
+  }));
+
+  // Celebration fires on isPeakLong for this track — hold it for the true
+  // finish (the race week), not the 10km milestone or interim peak longs.
+  const relabeled1 = stage1.map((w, i) => ({
+    ...w,
+    isPeakLong: false,
+    ...(i === stage1.length - 1 ? {
+      weekLabel: "Milestone: 10km 🎓",
+      note: `🎓 10km milestone week — the base is built. From next week the full training engine takes over on the road to ${goalKm}km.`,
+    } : {}),
+  }));
+  const relabeled2 = stage2.map(w => ({
+    ...w,
+    isPeakLong: !!w.isRaceWeek, // only the race/goal week triggers the celebration
+  }));
+
+  return [...relabeled1, ...relabeled2];
+}
+
 function buildPlan(profile, event, feedbackMap) {
   if (!profile) return [];
   if (profile.trainingGoal === "healthier") {
+    const goalKm = parseTargetKm(profile.targetDistance, profile.targetDistanceKm);
+    if (goalKm > BEGINNER_HANDOFF_KM) {
+      return buildJourneyPlan(profile, feedbackMap || {});
+    }
     return generateBeginnerPlan(profile, feedbackMap || {});
   }
   if (profile.trainingGoal === "maintenance") {
@@ -2844,8 +2938,9 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       trainingGoal:"",
       name:"", nickname:"",
       refDistance:"10k", refTime:"",
+      currentLongestKm:"",
       currentLongest:"", targetDistance:"", targetDistanceKm:"", timeline:"",
-      healthyFreq: 3,
+      currentDaysPerWeek: 1, healthyFreq: 3, maxDaysPerWeek: 3,
       returningRunner: false,
       dayPlan: DEFAULT_DAY_PLAN,
       workoutMinutes: DEFAULT_WORKOUT_MINUTES,
@@ -2869,11 +2964,16 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
       name: data.name, nickname: data.nickname,
       trainingGoal: data.trainingGoal,
       refDistance: data.refDistance, refTime: data.refTime,
+      currentLongestKm: data.currentLongestKm,
       dayPlan: data.dayPlan,
       currentLongest: data.currentLongest,
       targetDistance: data.targetDistance,
       targetDistanceKm: data.targetDistanceKm,
       timeline: data.timeline,
+      raceDate: data.timeline === "event" ? data.raceDate : "",
+      raceName: data.timeline === "event" ? data.raceName : "",
+      currentDaysPerWeek: data.currentDaysPerWeek,
+      maxDaysPerWeek: data.maxDaysPerWeek,
       healthyFreq: data.healthyFreq,
       returningRunner: data.returningRunner,
       trailAccess: data.trailAccess,
@@ -3138,6 +3238,25 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
               </select>
             </div>
             <div>
+              <label className="lbl">How many days a week do you currently run?</label>
+              <div style={{display:"flex",gap:6}}>
+                {[0,1,2,3].map(n => (
+                  <button key={n} onClick={() => up("currentDaysPerWeek", n)}
+                    style={{flex:1,padding:"10px",fontSize:14,fontWeight:700,cursor:"pointer",
+                      borderRadius:"var(--r)",
+                      border:`1.5px solid ${data.currentDaysPerWeek===n ? "var(--accent)" : "var(--rule)"}`,
+                      background: data.currentDaysPerWeek===n ? "var(--accent)" : "var(--white)",
+                      color: data.currentDaysPerWeek===n ? "white" : "var(--ink3)"}}>
+                    {n}x
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:"var(--ink4)",marginTop:6}}>
+                We'll start the plan at this frequency and add days in gradually — jumping straight to
+                a new schedule is one of the biggest causes of early running injuries.
+              </div>
+            </div>
+            <div>
               <label className="lbl">What would you like to be able to run?</label>
               <select value={data.targetDistance} onChange={e=>up("targetDistance",e.target.value)} className="sel">
                 <option value="">Select a common goal…</option>
@@ -3173,7 +3292,9 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                 )}
               </div>
               <div style={{fontSize:11,color:"var(--ink4)",marginTop:4}}>
-                Type any number — the plan will build you up to exactly this distance
+                Pick something exciting — daunting is fine. Goals past 10km become a two-stage
+                journey: this track builds your base to 10km, then the full training engine
+                takes over automatically for the rest. One plan, no gaps.
               </div>
             </div>
             <div>
@@ -3183,59 +3304,111 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                 <option value="8w">In 8 weeks (2 months)</option>
                 <option value="12w">In 12 weeks (3 months)</option>
                 <option value="16w">In 16 weeks (4 months)</option>
+                <option value="event">🎯 I've got an event date</option>
                 <option value="open">No deadline — just build slowly</option>
               </select>
+              {data.timeline === "event" && (
+                <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
+                  <input type="text" className="inp" placeholder="Event name (e.g. Spring 10k Fun Run)"
+                    value={data.raceName || ""} onChange={e => up("raceName", e.target.value)} />
+                  <input type="date" className="inp"
+                    value={data.raceDate || ""} onChange={e => up("raceDate", e.target.value)} />
+                  <div style={{fontSize:11,color:"var(--ink4)"}}>
+                    The plan will end on your event: a taper the week before, short shakeout runs
+                    race week, and the event itself on the day — with a race-day pacing strategy.
+                  </div>
+                </div>
+              )}
             </div>
             <div>
-              <label className="lbl">How many days a week would you like to run?</label>
+              <label className="lbl">How many days a week could you realistically run?</label>
               <div style={{display:"flex",gap:6}}>
                 {[2,3,4,5].map(n => (
-                  <button key={n} onClick={() => up("healthyFreq", n)}
+                  <button key={n} onClick={() => { up("maxDaysPerWeek", n); up("healthyFreq", n); }}
                     style={{flex:1,padding:"10px",fontSize:14,fontWeight:700,cursor:"pointer",
                       borderRadius:"var(--r)",
-                      border:`1.5px solid ${data.healthyFreq===n ? "var(--accent)" : "var(--rule)"}`,
-                      background: data.healthyFreq===n ? "var(--accent)" : "white",
-                      color: data.healthyFreq===n ? "white" : "var(--ink3)"}}>
+                      border:`1.5px solid ${data.maxDaysPerWeek===n ? "var(--accent)" : "var(--rule)"}`,
+                      background: data.maxDaysPerWeek===n ? "var(--accent)" : "var(--white)",
+                      color: data.maxDaysPerWeek===n ? "white" : "var(--ink3)"}}>
                     {n}x
                   </button>
                 ))}
               </div>
               <div style={{fontSize:11,color:"var(--ink4)",marginTop:6}}>
-                {data.healthyFreq === 2 && "2 days/week — a gentle start. Plenty of recovery between runs."}
-                {data.healthyFreq === 3 && "3 days/week — the sweet spot for building a habit."}
-                {data.healthyFreq === 4 && "4 days/week — good consistency. Take the rest days seriously."}
-                {data.healthyFreq === 5 && "5 days/week — ambitious. Prioritise sleep and recovery."}
+                This is the ceiling, not day one — we'll build up to it a day at a time, holding each
+                new frequency for a few weeks before adding another.
               </div>
             </div>
-            {/* Preview what the plan will look like — with 10% rule validation */}
+            {/* Preview what the plan will look like — matches the engine's actual
+                per-session safety cap, not a flat weekly-volume estimate */}
             {(data.targetDistanceKm || data.targetDistance) && data.timeline && data.currentLongest && (() => {
-              const goalKm   = parseTargetKm(data.targetDistance, data.targetDistanceKm);
-              const startKm  = parseCurrentKm(data.currentLongest);
-              const weeks    = parseTimeline(data.timeline);
-              const freq     = data.healthyFreq || 3;
+              const goalKm    = parseTargetKm(data.targetDistance, data.targetDistanceKm);
+              const startKm   = parseCurrentKm(data.currentLongest);
+              const weeks     = (() => {
+                if (data.timeline === "event" && data.raceDate) {
+                  const rd = new Date(data.raceDate + "T00:00:00");
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  if (!isNaN(rd) && rd > today) {
+                    return Math.max(2, Math.floor((rd - today) / 86400000 / 7) + 1);
+                  }
+                }
+                return parseTimeline(data.timeline);
+              })();
+              const startFreq = data.currentDaysPerWeek ?? 1;
+              const maxFreq   = data.maxDaysPerWeek || data.healthyFreq || 3;
 
-              // Total weekly volume = sum of all session distances (longest × ratios)
-              const sessionRatios = freq === 2 ? [0.85, 1.0]
-                                  : freq === 3 ? [0.7, 0.85, 1.0]
-                                  : freq === 4 ? [0.6, 0.8, 0.9, 1.0]
-                                  : [0.55, 0.7, 0.8, 0.9, 1.0];
-              const ratioSum = sessionRatios.reduce((a, b) => a + b, 0);
+              // ── Big goal → two-stage journey preview ──────────────
+              // Mirrors buildJourneyPlan's math so the promise matches the plan.
+              if (goalKm > BEGINNER_HANDOFF_KM) {
+                const safe1 = Math.max(startKm, 0.5);
+                const growth1 = startKm >= BEGINNER_HANDOFF_KM ? 0
+                  : Math.ceil(Math.log(BEGINNER_HANDOFF_KM / safe1) / Math.log(SINGLE_SESSION_CAP_RATIO));
+                const s1Est = growth1 === 0 ? 0 : Math.round(growth1 * 1.5) + 1;
+                const growth2 = Math.ceil(Math.log(Math.max(1.01, (goalKm * 0.9) / BEGINNER_HANDOFF_KM)) / Math.log(SINGLE_SESSION_CAP_RATIO));
+                const s2Est = Math.max(8, Math.min(24, Math.round(growth2 * 1.5) + 4));
+                return (
+                  <div style={{padding:"12px 14px",background:"rgba(0,240,255,0.10)",
+                    borderLeft:"3px solid var(--accent)",borderRadius:"var(--r)"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:6}}>
+                      🚀 Big goal — you'll get a two-stage journey
+                    </div>
+                    <div style={{fontSize:12,color:"var(--ink2)",lineHeight:1.8}}>
+                      <div>📍 Stage 1 · ~{s1Est} weeks — walk/run beginnings, {startKm}km up to 10km,
+                        adding run days gradually (up to {maxFreq}x/week)</div>
+                      <div>🎓 Graduation — the full training engine takes over automatically</div>
+                      <div>🏁 Stage 2 · ~{s2Est} weeks — proper build to {goalKm}km with peaks,
+                        recovery weeks, and a taper into {data.timeline === "event" && data.raceName ? data.raceName : "your goal"}</div>
+                      <div style={{marginTop:4,fontWeight:700}}>📅 Roughly {s1Est + s2Est} weeks all up</div>
+                      <div style={{marginTop:4,color:"var(--ink4)"}}>
+                        No single run ever grows more than ~10% past your longest so far — the whole
+                        way. Daunting goals are fine; rushed ones are how runners get hurt.
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
 
-              const startWeeklyKm = Math.round(startKm * ratioSum * 10) / 10;
-              const goalWeeklyKm  = Math.round(goalKm  * ratioSum * 10) / 10;
-
-              // Weeks needed at 10% compounding: startVol × 1.10^n ≥ goalVol
-              const safeStartVol = Math.max(startWeeklyKm, 1);
-              const weeksNeeded  = startKm >= goalKm
+              // Weeks needed for the longest single session to reach goalKm,
+              // growing at no more than SINGLE_SESSION_CAP_RATIO per exposure —
+              // this is the same cap the engine actually enforces, grounded in
+              // Frandsen/Nielsen et al. 2025 (Br J Sports Med): single-session
+              // spikes over ~10% of the recent longest run predict injury far
+              // more reliably than weekly volume change does.
+              const safeStart   = Math.max(startKm, 0.5);
+              const weeksForDistance = startKm >= goalKm
                 ? 0
-                : Math.ceil(Math.log(goalWeeklyKm / safeStartVol) / Math.log(1.10));
+                : Math.ceil(Math.log(goalKm / safeStart) / Math.log(SINGLE_SESSION_CAP_RATIO));
 
-              const isTooFast = weeksNeeded > weeks && goalKm > startKm;
-              const weeklyIncrease = Math.round((goalKm - startKm) / weeks * 10) / 10;
-              const suggestedLabel = weeksNeeded <= 8  ? "8 weeks"
-                                   : weeksNeeded <= 12 ? "12 weeks"
-                                   : weeksNeeded <= 16 ? "16 weeks"
-                                   : `${weeksNeeded} weeks`;
+              // Weeks needed to ramp frequency from where they are now up to
+              // their stated ceiling, adding one day every FREQUENCY_STEP_WEEKS.
+              const daysToAdd = Math.max(0, maxFreq - Math.max(startFreq, 1));
+
+              const weeksNeeded = Math.max(weeksForDistance, weeks);
+              const isTooFast = weeksForDistance > weeks && goalKm > startKm;
+              const suggestedLabel = weeksForDistance <= 8  ? "8 weeks"
+                                   : weeksForDistance <= 12 ? "12 weeks"
+                                   : weeksForDistance <= 16 ? "16 weeks"
+                                   : `${weeksForDistance} weeks`;
 
               return (
                 <>
@@ -3247,16 +3420,26 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                       </div>
                       <div style={{fontSize:12,color:"var(--ink2)",lineHeight:1.8}}>
                         <div>Going from <strong>{startKm}km</strong> to <strong>{goalKm}km</strong> safely means
-                          building your weekly volume by no more than ~10% each week.</div>
-                        <div style={{marginTop:6}}>At <strong>{freq} run{freq>1?"s":""}/week</strong>, that takes
-                          around <strong>{weeksNeeded} weeks</strong> — not {weeks}.</div>
-                        <div style={{marginTop:6,color:"#C06000",fontStyle:"italic"}}>
-                          👉 Try selecting <strong>"{suggestedLabel}"</strong> above, or reduce your goal distance —
-                          your body will thank you for it.
-                        </div>
-                        <div style={{marginTop:6,color:"var(--ink4)"}}>
-                          We'll still build your plan, but the ramp will be slowed to keep you healthy and injury-free.
-                        </div>
+                          no single run growing more than ~10% past your longest one so far.</div>
+                        <div style={{marginTop:6}}>That takes around <strong>{weeksForDistance} weeks</strong> — not {weeks}.</div>
+                        {data.timeline === "event" ? (
+                          <div style={{marginTop:6,color:"#C06000",fontStyle:"italic"}}>
+                            👉 Your event date is fixed, so we won't rush the training to match it. Training will
+                            build as far as it safely can, and race day itself gets a run/walk pacing strategy to
+                            cover the rest of the distance — completely normal for a first {goalKm}km.
+                          </div>
+                        ) : (
+                          <div style={{marginTop:6,color:"#C06000",fontStyle:"italic"}}>
+                            👉 Try selecting <strong>"{suggestedLabel}"</strong> above, or reduce your goal distance —
+                            your body will thank you for it.
+                          </div>
+                        )}
+                        {data.timeline !== "event" && (
+                          <div style={{marginTop:6,color:"var(--ink4)"}}>
+                            We'll still build your plan and never force an unsafe jump — but you may land short
+                            of {goalKm}km by the end if the timeline's too tight for that distance.
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -3266,11 +3449,14 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                       Your plan at a glance
                     </div>
                     <div style={{fontSize:12,color:"var(--ink2)",lineHeight:1.8}}>
-                      <div>📍 Starting at: ~{startKm}km per run (~{startWeeklyKm}km/week total)</div>
-                      <div>🎯 Goal: {goalKm}km per run (~{goalWeeklyKm}km/week total)</div>
-                      <div>📅 {weeks} weeks · adding ~{weeklyIncrease > 0 ? weeklyIncrease : "0.5"}km to your long run per week</div>
+                      <div>📍 Starting at: {startFreq}x/week, ~{startKm}km per run</div>
+                      <div>🎯 Goal: {goalKm}km per run</div>
+                      {daysToAdd > 0 && (
+                        <div>📆 Adding a run day roughly every 3 weeks, up to {maxFreq}x/week</div>
+                      )}
+                      <div>📅 {weeks} weeks · each run grows no more than ~10% past your longest so far</div>
                       <div>🏃 First run: ~{Math.max(0.5, Math.round(startKm * 0.7 * 10) / 10)}km{startKm < 3 ? " (walk/run)" : ""}</div>
-                      {!isTooFast && <div style={{marginTop:4,color:"var(--accent)"}}>✓ This timeline respects the 10% rule — good to go.</div>}
+                      {!isTooFast && <div style={{marginTop:4,color:"var(--accent)"}}>✓ This timeline gives your body time to adapt safely — good to go.</div>}
                     </div>
                   </div>
                 </>
@@ -3489,6 +3675,16 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
                 className="inp"/>
               <div style={{fontSize:11,color:"var(--ink4)",marginTop:3}}>
                 Race, time trial, or your best training run — mm:ss or h:mm:ss
+              </div>
+            </div>
+            <div>
+              <label className="lbl">Longest single run in the last month (km)</label>
+              <input type="number" min="1" step="0.5" inputMode="decimal"
+                value={data.currentLongestKm || ""} onChange={e=>up("currentLongestKm",e.target.value)}
+                placeholder="e.g. 12" className="inp"/>
+              <div style={{fontSize:11,color:"var(--ink4)",marginTop:3}}>
+                Your long runs will build from here — no single run jumps more than ~10% past
+                your longest so far. That's the biggest thing that keeps runners uninjured.
               </div>
             </div>
             {data.refTime && parseTime(data.refTime) && (() => {
@@ -4194,6 +4390,82 @@ function BronieToolsScreen({ onNav }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  LINKS SCREEN
+//  Categorised external shortcuts — Strava, route planning, race
+//  finder, shopping. All open in a new tab.
+// ─────────────────────────────────────────────────────────────
+function LinksScreen() {
+  const CATEGORIES = [
+    {
+      title: "Strava",
+      links: [
+        { label:"Open Strava", icon:"🟠", url:"https://strava.app.link/ulrXR3TIT4b" },
+      ],
+    },
+    {
+      title: "Route Planning",
+      links: [
+        { label:"On The Go Map", icon:"🗺️", url:"https://onthegomap.com/" },
+      ],
+    },
+    {
+      title: "Race Finder",
+      links: [
+        { label:"Running Calendar (AU)", icon:"🏁", url:"https://www.runningcalendar.com.au/" },
+      ],
+    },
+    {
+      title: "Shopping",
+      links: [
+        { label:"Running Warehouse AU", icon:"🛒", url:"https://www.runningwarehouse.com.au/?ctype=mrun" },
+        { label:"The Trail Co",         icon:"🛒", url:"https://www.thetrail.co/" },
+        { label:"Pace Athletic",        icon:"🛒", url:"https://www.paceathletic.com/" },
+        { label:"Wild Earth",           icon:"🛒", url:"https://www.wildearth.com.au/" },
+        { label:"The Athlete's Foot AU",icon:"🛒", url:"https://www.theathletesfoot.com.au/" },
+      ],
+    },
+  ];
+
+  return (
+    <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
+      <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
+        Links
+      </div>
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:24 }}>
+        Handy shortcuts — all open in a new tab.
+      </div>
+
+      {CATEGORIES.map(cat => (
+        <div key={cat.title} style={{ marginBottom:24 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
+            textTransform:"uppercase", marginBottom:10 }}>{cat.title}</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {cat.links.map(link => (
+              <a
+                key={link.url}
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="card"
+                style={{ padding:"14px 16px", textAlign:"left", cursor:"pointer", width:"100%",
+                  border:"1px solid var(--rule)", background:"var(--white)", textDecoration:"none",
+                  borderRadius:"var(--r)", display:"flex", alignItems:"center", gap:14,
+                  boxSizing:"border-box" }}>
+                <div style={{ fontSize:22, lineHeight:1, flexShrink:0 }}>{link.icon}</div>
+                <div style={{ flex:1, minWidth:0, fontSize:14, fontWeight:700, color:"var(--ink)" }}>
+                  {link.label}
+                </div>
+                <div style={{ fontSize:14, color:"var(--ink4)", flexShrink:0 }}>↗</div>
+              </a>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -5422,13 +5694,11 @@ function RaceDayLiveView({ racePlan, onExit }) {
             )}
           </div>
 
-          <div style={{ flex:1 }} />
-
           {/* Big advance button */}
           <button onClick={() => setNextIdx(i => i + 1)}
             style={{ width:"100%", padding:"20px", borderRadius:"var(--r)", border:"none",
               cursor:"pointer", background:"var(--gold)", color:"#0f2818",
-              fontSize:20, fontWeight:800, letterSpacing:.5, marginBottom:12,
+              fontSize:20, fontWeight:800, letterSpacing:.5, marginTop:8, marginBottom:12,
               boxShadow:"0 4px 16px rgba(0,0,0,.3)" }}>
             ✓ Reached {next.name} →
           </button>
@@ -6642,6 +6912,7 @@ function Header({ screen, onNav, hasData, onFeedback, userEmail, onLogout, onSig
             {id:"plan",      label:"Plan"},
             {id:"tools",     label:"Tools"},
             {id:"race",      label:"Event Setup"},
+            {id:"links",     label:"Links"},
             {id:"profile",   label:"Profile"},
           ].map(t => (
             <button key={t.id} onClick={() => onNav(t.id)}
@@ -8260,6 +8531,7 @@ export default function App() {
               trainingGoal: profile.trainingGoal,
               name: profile.name, nickname: profile.nickname,
               refDistance: profile.refDistance, refTime: profile.refTime,
+              currentLongestKm: profile.currentLongestKm,
               dayPlan: profile.dayPlan,
               event: event || undefined,
             } : null}/>
@@ -8501,6 +8773,10 @@ export default function App() {
           <PaceCalculatorScreen onBack={() => setScreen("tools")} />
         )}
 
+        {screen === "links" && hasData && (
+          <LinksScreen />
+        )}
+
         {screen === "race" && hasData && (
           <RaceDayScreen
             racePlan={racePlan}
@@ -8725,6 +9001,10 @@ export default function App() {
                 onClick={() => { setShowGoalCelebration(false); setScreen("onboarding"); }}>
                 🎯 Set a new goal
               </button>
+              <div style={{fontSize:11,color:"var(--ink4)",textAlign:"center",marginTop:-4,lineHeight:1.5}}>
+                Ready for a bigger event? Pick "Train for an event" next — you're a real runner now,
+                and the full training engine takes it from here.
+              </div>
               <button className="btn" style={{padding:"14px 0"}}
                 onClick={() => setShowGoalCelebration(false)}>
                 ✕ Nice, thanks
