@@ -291,6 +291,35 @@ const GOAL_CELEBRATION_MESSAGES = [
 ];
 
 // ─────────────────────────────────────────────────────────────
+//  DUMB INSPIRATION — rotating daft quotes to take the mind off
+//  the pain. Deterministic pick (day / station seeded) so they
+//  rotate without flickering on re-render.
+// ─────────────────────────────────────────────────────────────
+const DUMB_QUOTES = [
+  "Run like you left the oven on.",
+  "It never gets easier — you just forget faster.",
+  "You paid money to do this. Voluntarily.",
+  "The first 5km are the hardest. So is the rest.",
+  "Somewhere, your couch misses you. Stay strong.",
+  "Pain is just your legs writing a strongly worded letter.",
+  "You're not slow, the ground is moving backwards slower than expected.",
+  "Blisters are just applause from your shoes.",
+  "Remember: nobody has ever been chased by a treadmill.",
+  "Your ancestors ran from lions. You run for a banana at a folding table.",
+  "This was YOUR idea.",
+  "If you can read this, you're not running hard enough. Or you're at an aid station. Carry on.",
+  "Every hill is flat if you complain loudly enough.",
+  "Legs are 90% mental. The other half is also mental.",
+  "Chafing is temporary. The story is forever.",
+  "You could be at brunch right now. Anyway, keep going.",
+  "The finish line is just the start line having a lie down.",
+  "Smile at the photographer. Cry after the photographer.",
+];
+function dumbQuote(seed) {
+  return DUMB_QUOTES[Math.abs(seed) % DUMB_QUOTES.length];
+}
+
+// ─────────────────────────────────────────────────────────────
 //  CONSTANTS
 // ─────────────────────────────────────────────────────────────
 // Sydney wall-clock today as a plain Date object (year/month/day only, no time component).
@@ -811,7 +840,7 @@ function buildGarminWorkout(session,paces){
     steps.push(garminLapStep(0,"warmup",2000,zwu[0],zwu[1],"2km warm up"));
     steps.push(garminRepeat(0,sets,[garminTimeStep(0,"interval",120,null,null,"2min hill effort — hard (RPE 7–8)"),garminTimeStep(0,"recovery",120,null,null,"Walk back to start — full recovery")]));
     steps.push(garminLapStep(0,"cooldown",2000,null,null,"2km cool down"));
-  } else if(["easy","bronies","long"].includes(session.wtype)){
+  } else if(["easy","bronies","parkrun","long"].includes(session.wtype)){
     const distM=Math.round((session.distance||8)*1000);
     steps.push(garminStep(0,"interval",distM,zep[0],zep[1],`${session.distance}km easy @ ${fmtPace(ep)}/km or slower`));
   } else {
@@ -956,6 +985,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
     || session?.wtype === "ladder" || session?.wtype === "progression" ? "workout"
     : session?.wtype === "long" ? "long"
     : session?.wtype === "bronies" ? "bronies"
+    : session?.wtype === "parkrun" ? "parkrun"
     : session?.wtype === "race" ? "long"
     : session?.wtype === "rest" ? "rest"
     : "easy"] || SLOT_TYPES.rest;
@@ -2033,6 +2063,7 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
                       : SLOT_TYPES[
                       w.sessions[d.id].wtype === "long" ? "long"
                       : w.sessions[d.id].wtype === "bronies" ? "bronies"
+                      : w.sessions[d.id].wtype === "parkrun" ? "parkrun"
                       : w.sessions[d.id].wtype === "easy" ? "easy"
                       : "workout"]?.color || "var(--ink3)";
                     return (
@@ -2137,16 +2168,18 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
 function DayPlanPicker({ value, onChange, simplified }) {
   const plan = value || DEFAULT_DAY_PLAN;
   const RUN_TYPES = ["workout", "easy", "long", "bronies", "rest"];
-  // Beginner track: the engine only distinguishes run-day vs rest-day (isRunDay()),
-  // so "Workout" and "Long Run" are meaningless distinctions here and just confuse
-  // a brand-new runner. Collapse them down to Easy Run / BRONIES / Rest (+Str stays,
+  // Beginner track: "Workout" is meaningless here (the engine has no intensity
+  // sessions for beginners), but "Long(er)" matters — it marks THE day where
+  // volume grows week to week. Easy / Long(er) / BRONIES / Rest (+Str stays,
   // strength work is genuinely useful injury-prevention for this group).
   const ALL_SLOTS = simplified
-    ? ["easy", "bronies", "strength", "rest"]
+    ? ["easy", "long", "parkrun", "bronies", "strength", "rest"]
     : ["workout", "easy", "long", "bronies", "strength", "rest"];
-  // For display only — a profile carried over from the default day plan may still
-  // have "workout"/"long" set on a day; treat those as "easy" so the pill lights up.
-  const displaySlot = k => (simplified && (k === "workout" || k === "long")) ? "easy" : k;
+  // For display only — remap "workout" (from carried-over event day plans) to "easy".
+  const displaySlot = k => (simplified && k === "workout") ? "easy" : k;
+  // In simplified mode the long slot reads "Long(er)" — it's the growth day,
+  // not a capital-L Long Run yet.
+  const slotLabel = (k, label) => (simplified && k === "long") ? "Long(er)" : label;
 
   function toggleDay(dayId, key) {
     const current      = normaliseSlot(plan[dayId]);
@@ -2176,6 +2209,7 @@ function DayPlanPicker({ value, onChange, simplified }) {
     }
 
     if (!isBroniesDay) next = next.filter(k => k !== "bronies");
+    if (dayId !== "sat") next = next.filter(k => k !== "parkrun");
     if (!next.length) next = ["rest"];
     const val = next.length === 1 ? next[0] : next;
     onChange({ ...plan, [dayId]: val });
@@ -2189,7 +2223,9 @@ function DayPlanPicker({ value, onChange, simplified }) {
         const primary      = primarySlot(current);
         const strengthOn   = current.includes("strength");
         const isBroniesDay = d.id === "wed" || d.id === "fri";
-        const availableSlots = ALL_SLOTS.filter(k => k !== "bronies" || isBroniesDay);
+        const availableSlots = ALL_SLOTS
+          .filter(k => k !== "bronies" || isBroniesDay)
+          .filter(k => k !== "parkrun" || d.id === "sat");
 
         return (
           <div key={d.id} style={{border:"1px solid var(--rule)",borderRadius:"var(--r)",
@@ -2209,7 +2245,7 @@ function DayPlanPicker({ value, onChange, simplified }) {
                       <button
                         onClick={() => toggleDay(d.id, k)}
                         disabled={disabled}
-                        title={isStrengthBtn ? (active ? "Remove strength" : "Add strength to this day") : m.label}
+                        title={isStrengthBtn ? (active ? "Remove strength" : "Add strength to this day") : slotLabel(k, m.label)}
                         style={{
                           display:"flex",alignItems:"center",gap:3,padding:"5px 9px",
                           fontSize:11,fontWeight:600,cursor:disabled?"not-allowed":"pointer",
@@ -2220,7 +2256,7 @@ function DayPlanPicker({ value, onChange, simplified }) {
                           transition:"all .15s",
                         }}>
                         <span>{m.icon}</span>
-                        {isStrengthBtn ? (active ? "−Str" : "+Str") : m.label}
+                        {isStrengthBtn ? (active ? "−Str" : "+Str") : slotLabel(k, m.label)}
                       </button>
                     </React.Fragment>
                   );
@@ -2237,12 +2273,25 @@ function DayPlanPicker({ value, onChange, simplified }) {
       })}
       <div style={{padding:"10px 12px",background:"var(--bg)",borderRadius:"var(--r)",
         fontSize:11,color:"var(--ink3)",lineHeight:1.6,fontStyle:"italic"}}>
-        <strong style={{color:"var(--ink2)"}}>Workout</strong> = intervals/tempo/hills ·
-        <strong style={{color:"var(--ink2)"}}> Easy</strong> = recovery jog ·
-        <strong style={{color:"var(--ink2)"}}> Long</strong> = the cornerstone session ·
-        <strong style={{color:"var(--ink2)"}}> BRONIES</strong> = 7.99km social (Wed &amp; Fri only) ·
-        <strong style={{color:"var(--ink2)"}}> +Str</strong> = add strength to any run day ·
-        <strong style={{color:"var(--ink2)"}}> Rest</strong> = full day off
+        {simplified ? (
+          <>
+            <strong style={{color:"var(--ink2)"}}>Easy</strong> = relaxed run/walk ·
+            <strong style={{color:"var(--ink2)"}}> Long(er)</strong> = your growth day — this is the run that gets longer each week ·
+            <strong style={{color:"var(--ink2)"}}> parkrun</strong> = Saturday 5km, walk breaks welcome ·
+            <strong style={{color:"var(--ink2)"}}> BRONIES</strong> = 7.99km social (Wed &amp; Fri only) ·
+            <strong style={{color:"var(--ink2)"}}> +Str</strong> = add strength to any run day ·
+            <strong style={{color:"var(--ink2)"}}> Rest</strong> = full day off
+          </>
+        ) : (
+          <>
+            <strong style={{color:"var(--ink2)"}}>Workout</strong> = intervals/tempo/hills ·
+            <strong style={{color:"var(--ink2)"}}> Easy</strong> = recovery jog ·
+            <strong style={{color:"var(--ink2)"}}> Long</strong> = the cornerstone session ·
+            <strong style={{color:"var(--ink2)"}}> BRONIES</strong> = 7.99km social (Wed &amp; Fri only) ·
+            <strong style={{color:"var(--ink2)"}}> +Str</strong> = add strength to any run day ·
+            <strong style={{color:"var(--ink2)"}}> Rest</strong> = full day off
+          </>
+        )}
       </div>
     </div>
   );
@@ -3041,12 +3090,12 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
             {TRAINING_GOALS.map(g => (
               <div key={g.value} onClick={() => up("trainingGoal", g.value)}
                 style={{display:"flex",alignItems:"center",gap:14,padding:"16px 18px",cursor:"pointer",
-                  background: data.trainingGoal===g.value ? "rgba(0,240,255,0.10)" : "white",
+                  background: data.trainingGoal===g.value ? "rgba(0,240,255,0.10)" : "var(--white)",
                   border:`2px solid ${data.trainingGoal===g.value ? "var(--accent)" : "var(--rule)"}`,
                   borderRadius:"var(--r)",transition:"all .15s"}}>
                 <div style={{width:20,height:20,borderRadius:"50%",flexShrink:0,
                   border:`2px solid ${data.trainingGoal===g.value ? "var(--accent)" : "var(--rule)"}`,
-                  background: data.trainingGoal===g.value ? "var(--accent)" : "white",
+                  background: data.trainingGoal===g.value ? "var(--accent)" : "var(--white)",
                   display:"flex",alignItems:"center",justifyContent:"center"}}>
                   {data.trainingGoal===g.value && <div style={{width:8,height:8,borderRadius:"50%",background:"var(--white)"}}/>}
                 </div>
@@ -5532,6 +5581,14 @@ function RaceModePanel({ race, strategy, validLegs }) {
   );
 }
 
+// Format legMins as "1h 7min" or "45min" — shared by the Race Plan
+// output and the Race Day live view.
+function fmtLegTime(mins) {
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return h > 0 ? `${h}h ${m}min` : `${m}min`;
+}
+
 // ─────────────────────────────────────────────────────────────
 //  RACE DAY LIVE VIEW — the "virtual crew"
 //  Glanceable, forward-looking. Shows the next aid station, distance,
@@ -5542,6 +5599,12 @@ function RaceDayLiveView({ racePlan, onExit }) {
   const race     = racePlan?.race || { title:"", legs:[] };
   const strategy = racePlan?.strategy || DEFAULT_STRATEGY;
   const legs     = (race.legs || []).filter(l => (parseFloat(l.km) || 0) > 0);
+
+  // Full fuelling plan — same engine as the Race Plan screen, so the live
+  // view can say exactly what to do at each station: how many flasks to
+  // fill, how many solids to carry out, what to grab from the table.
+  const fuelPlan = generateRacePlan(race, strategy);
+  const fuelLegs = fuelPlan?.legs || [];
 
   // Build cumulative distance markers for each aid station
   const stations = (() => {
@@ -5699,6 +5762,57 @@ function RaceDayLiveView({ racePlan, onExit }) {
             </div>
           )}
 
+          {/* Current leg: what should already be in the vest */}
+          {fuelLegs[nextIdx] && (
+            <div style={{ background:"rgba(255,255,255,.06)", borderRadius:"var(--r)",
+              padding:"12px 16px", marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
+                color:"rgba(255,255,255,.5)", marginBottom:6 }}>🎒 This leg — you should be carrying</div>
+              <div style={{ fontSize:15, lineHeight:1.6 }}>
+                {fuelLegs[nextIdx].vestItems} solid{fuelLegs[nextIdx].vestItems !== 1 ? "s" : ""} ·{" "}
+                {fuelLegs[nextIdx].flasks} flask{fuelLegs[nextIdx].flasks !== 1 ? "s" : ""} ·{" "}
+                ~{Math.round(fuelLegs[nextIdx].carbsG)}g carbs / {fuelLegs[nextIdx].fluidMl}ml over ~{fmtLegTime(fuelLegs[nextIdx].legMins)}
+              </div>
+              {fuelLegs[nextIdx].drinkMixNote && (
+                <div style={{ fontSize:12, color:"rgba(255,255,255,.55)", marginTop:4 }}>
+                  💧 {fuelLegs[nextIdx].drinkMixNote}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* At the station: the pit-stop checklist for the NEXT leg */}
+          {fuelLegs[nextIdx + 1] ? (
+            <div style={{ background:"rgba(0,240,255,.10)", borderRadius:"var(--r)",
+              borderLeft:"4px solid var(--gold)", padding:"14px 16px", marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
+                color:"var(--gold)", marginBottom:8 }}>✅ At {next.name} — before you leave</div>
+              <div style={{ fontSize:16, lineHeight:1.9 }}>
+                <div>💧 Fill <strong>{fuelLegs[nextIdx + 1].flasks} flask{fuelLegs[nextIdx + 1].flasks !== 1 ? "s" : ""}</strong> ({fuelLegs[nextIdx + 1].fluidMl}ml for next leg)</div>
+                <div>🍬 Carry out <strong>{fuelLegs[nextIdx + 1].vestItems} solid{fuelLegs[nextIdx + 1].vestItems !== 1 ? "s" : ""}</strong> (~{Math.round(fuelLegs[nextIdx + 1].carbsG)}g for ~{fmtLegTime(fuelLegs[nextIdx + 1].legMins)})</div>
+              </div>
+              {fuelLegs[nextIdx]?.aidStation && (fuelLegs[nextIdx].aidStation.substitutions.length > 0 || fuelLegs[nextIdx].aidStation.caffeine?.suggestion) && (
+                <div style={{ marginTop:8, paddingTop:8, borderTop:"1px dashed rgba(255,255,255,.2)" }}>
+                  {fuelLegs[nextIdx].aidStation.substitutions.map((s, si) => (
+                    <div key={si} style={{ fontSize:13, lineHeight:1.6, color:"rgba(255,255,255,.85)" }}>🍌 {s}</div>
+                  ))}
+                  {fuelLegs[nextIdx].aidStation.caffeine?.suggestion && (
+                    <div style={{ fontSize:13, lineHeight:1.6, color:"#ffcf70" }}>☕ {fuelLegs[nextIdx].aidStation.caffeine.suggestion}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Last station — it's the run home */
+            fuelLegs.length > 0 && (
+              <div style={{ background:"rgba(0,240,255,.10)", borderRadius:"var(--r)",
+                borderLeft:"4px solid var(--gold)", padding:"14px 16px", marginBottom:12,
+                fontSize:15, lineHeight:1.6 }}>
+                🏁 {next.name} is the last stop — grab what you fancy, then it's the run home.
+              </div>
+            )
+          )}
+
           {/* Stock + climb quick facts */}
           <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:24 }}>
             {next.stock && (
@@ -5713,6 +5827,12 @@ function RaceDayLiveView({ racePlan, onExit }) {
                 ⛰ {next.gainM}m climb
               </div>
             )}
+          </div>
+
+          {/* Daft quote — a fresh one per station, to take the mind off the legs */}
+          <div style={{ fontSize:13, color:"rgba(255,255,255,.45)", fontStyle:"italic",
+            textAlign:"center", padding:"4px 8px 14px", lineHeight:1.5 }}>
+            "{dumbQuote(nextIdx * 7 + stations.length)}"
           </div>
 
           {/* Big advance button */}
@@ -6496,13 +6616,6 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
 
   function clearGear() {
     onChange({ ...racePlan, race: { ...race, gearChecked: [] } });
-  }
-
-  // Format legMins as "1h 7min" or "45min"
-  function fmtLegTime(mins) {
-    const h = Math.floor(mins / 60);
-    const m = Math.round(mins % 60);
-    return h > 0 ? `${h}h ${m}min` : `${m}min`;
   }
 
   // Format pace as "7:12 /km"
@@ -8552,6 +8665,14 @@ export default function App() {
               name: profile.name, nickname: profile.nickname,
               refDistance: profile.refDistance, refTime: profile.refTime,
               currentLongestKm: profile.currentLongestKm,
+              currentLongest: profile.currentLongest,
+              targetDistance: profile.targetDistance,
+              targetDistanceKm: profile.targetDistanceKm,
+              timeline: profile.timeline,
+              raceDate: profile.raceDate, raceName: profile.raceName,
+              currentDaysPerWeek: profile.currentDaysPerWeek,
+              maxDaysPerWeek: profile.maxDaysPerWeek,
+              healthyFreq: profile.healthyFreq,
               dayPlan: profile.dayPlan,
               event: event || undefined,
             } : null}/>
@@ -8986,6 +9107,9 @@ export default function App() {
         />
 
         <div style={{padding:"24px var(--pad-x) 16px",textAlign:"center",borderTop:"1px solid var(--rule)",marginTop:24}}>
+          <div style={{fontSize:12,color:"var(--ink4)",fontStyle:"italic",marginBottom:6,lineHeight:1.5}}>
+            "{dumbQuote(Math.floor(Date.now() / 86400000))}"
+          </div>
           <div style={{fontSize:13,color:"var(--ink3)",fontStyle:"italic",letterSpacing:.3}}>
             embrace the .99 chaos
           </div>
