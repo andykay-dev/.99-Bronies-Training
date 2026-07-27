@@ -5047,9 +5047,9 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
 
   // Common distances quick-pick
   const QUICK_DISTANCES = [
+    { label:"5km", km:5 },
     { label:"10km", km:10 },
     { label:"Half", km:21.1 },
-    { label:"30km", km:30 },
     { label:"Mara", km:42.2 },
   ];
 
@@ -5084,26 +5084,29 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
       <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
         textTransform:"uppercase", marginBottom:8 }}>Distance</div>
 
-      <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" }}>
-        {QUICK_DISTANCES.map(d => (
-          <button key={d.label}
-            onClick={() => setDistKm(String(d.km))}
-            style={{ padding:"6px 14px", borderRadius:"var(--r)", fontSize:12, fontWeight:700,
-              border:`2px solid ${parseFloat(distKm) === d.km ? "var(--accent)" : "var(--rule)"}`,
-              background: parseFloat(distKm) === d.km ? "var(--accent)" : "var(--white)",
-              color: parseFloat(distKm) === d.km ? "#fff" : "var(--ink3)",
-              cursor:"pointer", transition:"all .15s" }}>
-            {d.label}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:16 }}>
+      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:8 }}>
         <input className="inp" type="number" min="0" step="0.1" placeholder="km"
-          style={{ width:90 }}
+          style={{ width:100, fontSize:16, fontWeight:700 }}
           value={distKm}
           onChange={e => setDistKm(e.target.value)} />
         <span style={{ fontSize:13, color:"var(--ink3)" }}>km</span>
+      </div>
+
+      <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+        {QUICK_DISTANCES.map(d => {
+          const isSelected = parseFloat(distKm) === d.km;
+          return (
+            <button key={d.label}
+              onClick={() => setDistKm(String(d.km))}
+              style={{ padding:"5px 12px", borderRadius:99, fontSize:12, fontWeight:600,
+                border:"none",
+                background: isSelected ? "var(--accent)" : "var(--bg)",
+                color: isSelected ? "#fff" : "var(--ink3)",
+                cursor:"pointer", transition:"all .15s" }}>
+              {d.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Fuel interval ────────────────────────────────────── */}
@@ -5122,40 +5125,48 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
           : "Enter distance and pace to see a recommendation, or pick manually."}
       </div>
 
-      {/* Auto button + minute grid 20–59 */}
+      {/* Auto button + 5 basic intervals */}
       <div style={{ marginBottom:16 }}>
-        <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
           <button
             onClick={() => setFuelIntervalMins(null)}
-            style={{ padding:"6px 14px", borderRadius:"var(--r)", fontSize:11, fontWeight:700,
+            style={{ padding:"8px 16px", borderRadius:"var(--r)", fontSize:13, fontWeight:700,
               cursor:"pointer", transition:"all .15s",
               border:`2px solid ${fuelIntervalMins === null ? "var(--accent)" : "var(--rule)"}`,
               background: fuelIntervalMins === null ? "var(--accent)" : "var(--white)",
               color: fuelIntervalMins === null ? "#fff" : "var(--ink3)" }}>
             Auto{plan ? ` (${plan.recommendedIntervalMins}min)` : ""}
           </button>
-        </div>
-
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(8,1fr)", gap:4 }}>
-          {Array.from({ length:40 }, (_, i) => i + 20).map(min => {
-            const isSelected    = fuelIntervalMins === min;
-            const isRecommended = plan && min === plan.recommendedIntervalMins && fuelIntervalMins === null;
+          {[30, 40, 45, 50, 60].map(min => {
+            const isSelected = fuelIntervalMins === min;
             return (
               <button key={min}
-                onClick={() => setFuelIntervalMins(fuelIntervalMins === min ? null : min)}
-                style={{ padding:"6px 2px", borderRadius:"var(--r)", fontSize:11, fontWeight:700,
-                  textAlign:"center", cursor:"pointer", transition:"all .15s",
-                  border:`2px solid ${isSelected ? "var(--accent)" : isRecommended ? "var(--accent)" : "var(--rule)"}`,
-                  background: isSelected ? "var(--accent)" : isRecommended ? "var(--accent-light)" : "var(--white)",
-                  color: isSelected ? "#fff" : isRecommended ? "var(--accent)" : "var(--ink3)" }}>
-                {min}
+                onClick={() => setFuelIntervalMins(isSelected ? null : min)}
+                style={{ padding:"8px 16px", borderRadius:"var(--r)", fontSize:13, fontWeight:700,
+                  cursor:"pointer", transition:"all .15s",
+                  border:`2px solid ${isSelected ? "var(--accent)" : "var(--rule)"}`,
+                  background: isSelected ? "var(--accent)" : "var(--white)",
+                  color: isSelected ? "#fff" : "var(--ink3)" }}>
+                {min === 60 ? "1hr" : `${min}min`}
               </button>
             );
           })}
         </div>
-        <div style={{ fontSize:10, color:"var(--ink4)", marginTop:5, lineHeight:1.4 }}>
-          Minutes between each fuel item · blue = recommended · tap again to deselect
+        <div style={{ fontSize:10, color:"var(--ink4)", marginTop:6, lineHeight:1.4 }}>
+          Minutes between each fuel item · tap again to go back to Auto
         </div>
+        {plan && (
+          <div style={{ marginTop:10, padding:"10px 14px", background:"rgba(0,240,255,0.10)",
+            borderLeft:"3px solid var(--gold)", borderRadius:"var(--r)",
+            display:"flex", alignItems:"flex-start", gap:8 }}>
+            <div style={{ fontSize:16, flexShrink:0 }}>⌚</div>
+            <div style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.6 }}>
+              <strong style={{ color:"var(--gold)" }}>Set a repeat alarm on your watch</strong> for
+              every {plan.activeIntervalMins}min — it's easy to forget to fuel once you're deep into
+              a run. Don't rely on remembering.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Pace ─────────────────────────────────────────── */}
@@ -5318,6 +5329,16 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
               textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>Strategy</div>
             <div style={{ fontSize:13, color:"var(--ink)", lineHeight:1.5 }}>{plan.carbsNote}</div>
           </div>
+
+          {/* What you'll actually consume, vs recommended */}
+          {plan.fuelMessage && (
+            <div style={{ padding:"10px 14px", background:"var(--bg)",
+              border:"1px solid var(--rule)", borderRadius:"var(--r)", marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)",
+                textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>Your actual intake</div>
+              <div style={{ fontSize:13, color:"var(--ink)", lineHeight:1.5 }}>{plan.fuelMessage}</div>
+            </div>
+          )}
 
           {/* Fuelling caution — high carb rate needs a trained gut */}
           {plan.carbRate >= 65 && (
@@ -6010,6 +6031,9 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
   const validLegs    = (race.legs || []).filter(l => l.km > 0);
   const totalDistKm  = validLegs.reduce((a, l) => a + (parseFloat(l.km) || 0), 0);
   const totalAscentM = validLegs.reduce((a, l) => a + (parseInt(l.gainM, 10) || 0), 0);
+  const previewPlan  = validLegs.length > 0 && strategy.targetHours
+    ? generateRacePlan(race, strategy)
+    : null;
 
   // ── section collapse state ────────────────────────────────
   // Default open. Auto-collapse Course Setup once legs are set, auto-collapse
@@ -6261,6 +6285,66 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
             </button>
           ))}
         </div>
+
+        {/* ── Fuel interval — how often, race-wide ─────────────── */}
+        <label className="lbl" style={{ marginTop:16, display:"block" }}>How often will you fuel?</label>
+        <div style={{ fontSize:11, color:"var(--ink3)", marginBottom:8, lineHeight:1.5 }}>
+          Auto sizes each leg's fuel by its own length. Pick a number to use the same interval
+          for the whole race instead.
+        </div>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
+          <button
+            onClick={() => updateStrategy({ fuelIntervalMins: null })}
+            style={{ padding:"8px 16px", borderRadius:"var(--r)", fontSize:13, fontWeight:700,
+              cursor:"pointer", transition:"all .15s",
+              border:`2px solid ${!strategy.fuelIntervalMins ? "var(--accent)" : "var(--rule)"}`,
+              background: !strategy.fuelIntervalMins ? "var(--accent)" : "var(--white)",
+              color: !strategy.fuelIntervalMins ? "#fff" : "var(--ink3)" }}>
+            Auto (per leg)
+          </button>
+          {[30, 40, 45, 50, 60].map(min => {
+            const isSelected = strategy.fuelIntervalMins === min;
+            return (
+              <button key={min}
+                onClick={() => updateStrategy({ fuelIntervalMins: isSelected ? null : min })}
+                style={{ padding:"8px 16px", borderRadius:"var(--r)", fontSize:13, fontWeight:700,
+                  cursor:"pointer", transition:"all .15s",
+                  border:`2px solid ${isSelected ? "var(--accent)" : "var(--rule)"}`,
+                  background: isSelected ? "var(--accent)" : "var(--white)",
+                  color: isSelected ? "#fff" : "var(--ink3)" }}>
+                {min === 60 ? "1hr" : `${min}min`}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:10, color:"var(--ink4)", marginBottom:4 }}>
+          Minutes between each fuel item · tap again to go back to Auto
+        </div>
+
+        {(previewPlan || strategy.fuelIntervalMins) && (
+          <div style={{ padding:"10px 14px", background:"rgba(0,240,255,0.10)",
+            borderLeft:"3px solid var(--gold)", borderRadius:"var(--r)", marginBottom:8,
+            display:"flex", alignItems:"flex-start", gap:8 }}>
+            <div style={{ fontSize:16, flexShrink:0 }}>⌚</div>
+            <div style={{ fontSize:12, color:"var(--ink2)", lineHeight:1.6 }}>
+              <strong style={{ color:"var(--gold)" }}>Set a repeat alarm on your watch</strong> —
+              {strategy.fuelIntervalMins
+                ? ` every ${strategy.fuelIntervalMins}min for the whole race.`
+                : " intervals vary per leg on Auto, so check the exact timing on each leg below and reset the alarm at each aid station."
+              } Easy to forget to fuel deep into a long day — don't rely on remembering.
+            </div>
+          </div>
+        )}
+
+        {/* What you'll actually consume, vs recommended — whole race */}
+        {previewPlan?.overallFuelMessage && (
+          <div style={{ padding:"10px 14px", background:"var(--bg)",
+            border:"1px solid var(--rule)", borderRadius:"var(--r)", marginTop:8 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)",
+              textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>Your actual intake</div>
+            <div style={{ fontSize:13, color:"var(--ink)", lineHeight:1.5 }}>{previewPlan.overallFuelMessage}</div>
+          </div>
+        )}
       </div>
 
       {/* Totals pill */}
@@ -6577,6 +6661,9 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
       {/* ══ SECTION 3: Race Plan Output ══════════════════════ */}
       <RacePlanOutput race={race} strategy={strategy} validLegs={validLegs} onChange={onChange} racePlan={racePlan} />
 
+      {/* ══ SECTION 4: The Idiot List — everything else ══════ */}
+      <PrepChecklistSection race={race} racePlan={racePlan} onChange={onChange} />
+
     </div>
   );
 }
@@ -6586,6 +6673,188 @@ function RaceDayScreen({ racePlan, onChange, nutritionLib = [], onNutritionLibAd
 //  Calls generateRacePlan and renders results. Pure display —
 //  no state of its own beyond what the engine returns.
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  PREP CHECKLIST — "the idiot list"
+//  Everything besides the technical race gear: what to pack, what to
+//  prep on your body, tech setup, what you'll actually eat, and the
+//  drop bag for the finish. Long by nature, so it's grouped into
+//  collapsible categories with a checked-count badge on each header —
+//  scan the badges, open only what still needs attention.
+// ─────────────────────────────────────────────────────────────
+const PREP_CATEGORIES = [
+  {
+    id: "kit", title: "Clothing & Comfort", icon: "👕",
+    items: [
+      "2x favourite running shirts",
+      "2x favourite hats/caps",
+      "Running jacket",
+      "Gloves",
+      "Head buff",
+      "Neck buff",
+      "Wrist buff",
+      "Multiple pairs of socks",
+      "Sunglasses",
+    ],
+  },
+  {
+    id: "body", title: "Body Prep", icon: "💅",
+    items: [
+      "Nipple tape",
+      "Strapping tape (blister-prone spots, taped before the gun)",
+      "Sun cream",
+      "Toenails cut (days before, not the morning of)",
+      "Haircut, if that's your pre-race ritual",
+    ],
+  },
+  {
+    id: "tech", title: "Tech Setup", icon: "🔋",
+    items: [
+      "Watch fully charged",
+      "Portable phone charger packed (and charged)",
+      "Course loaded onto watch",
+      "Live tracker set up so people can follow along",
+    ],
+  },
+  {
+    id: "dropbag", title: "Drop Bag — for the finish", icon: "🎒",
+    items: [
+      "Clean shirt to change into",
+      "A snack for after",
+    ],
+  },
+];
+
+const PREP_NOTE_FIELDS = [
+  { id:"breakfast", label:"Breakfast", placeholder:"e.g. porridge + banana, 2hrs before the start" },
+  { id:"caffeine",  label:"Caffeine intake", placeholder:"e.g. one coffee at breakfast, caffeinated gel around hour 4" },
+  { id:"fluids",    label:"Fluids before the start", placeholder:"e.g. 500ml on waking, sip until the gun" },
+  { id:"dinner",    label:"Dinner the night before", placeholder:"e.g. pasta + chicken — nothing new" },
+];
+
+function PrepChecklistSection({ race, racePlan, onChange }) {
+  const [openCats, setOpenCats] = useState(new Set());
+
+  const checked = race.prepChecklist || {};
+  const notes   = race.prepNotes || {};
+
+  function toggleItem(catId, item) {
+    const key = `${catId}:${item}`;
+    onChange({ ...racePlan, race: { ...race,
+      prepChecklist: { ...checked, [key]: !checked[key] } } });
+  }
+  function setNote(fieldId, value) {
+    onChange({ ...racePlan, race: { ...race,
+      prepNotes: { ...notes, [fieldId]: value } } });
+  }
+  function toggleCat(catId) {
+    const next = new Set(openCats);
+    if (next.has(catId)) next.delete(catId); else next.add(catId);
+    setOpenCats(next);
+  }
+
+  const totalItems   = PREP_CATEGORIES.reduce((sum, c) => sum + c.items.length, 0);
+  const totalChecked = Object.values(checked).filter(Boolean).length;
+
+  return (
+    <div>
+      <hr className="rule" />
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:4 }}>
+        <div style={{ fontFamily:"var(--display)", fontSize:20, letterSpacing:.5 }}>
+          The Idiot List
+        </div>
+        <div style={{ fontSize:12, color:"var(--ink3)" }}>
+          {totalChecked}/{totalItems}
+        </div>
+      </div>
+      <div style={{ fontSize:12, color:"var(--ink3)", fontStyle:"italic", marginBottom:14, lineHeight:1.5 }}>
+        Everything that isn't race gear — pack it, prep it, don't forget it at 4am.
+      </div>
+
+      {PREP_CATEGORIES.map(cat => {
+        const catCheckedCount = cat.items.filter(item => checked[`${cat.id}:${item}`]).length;
+        const isOpen = openCats.has(cat.id);
+        const isDone = catCheckedCount === cat.items.length;
+        return (
+          <div key={cat.id} style={{ marginBottom:8, border:"1px solid var(--rule)",
+            borderRadius:"var(--r)", overflow:"hidden" }}>
+            <button onClick={() => toggleCat(cat.id)}
+              style={{ width:"100%", padding:"12px 14px", background:"var(--white)",
+                border:"none", cursor:"pointer", display:"flex", alignItems:"center",
+                justifyContent:"space-between", textAlign:"left" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontSize:18 }}>{cat.icon}</span>
+                <span style={{ fontSize:14, fontWeight:700, color:"var(--ink)" }}>{cat.title}</span>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:12, fontWeight:700,
+                  color: isDone ? "var(--accent)" : "var(--ink4)" }}>
+                  {isDone ? "✓ " : ""}{catCheckedCount}/{cat.items.length}
+                </span>
+                <span style={{ fontSize:11, color:"var(--ink4)" }}>{isOpen ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {isOpen && (
+              <div style={{ padding:"4px 12px 12px" }}>
+                {cat.items.map(item => {
+                  const key = `${cat.id}:${item}`;
+                  const isChecked = !!checked[key];
+                  return (
+                    <div key={item}
+                      onClick={() => toggleItem(cat.id, item)}
+                      style={{ display:"flex", alignItems:"center", gap:10,
+                        padding:"8px 8px", borderRadius:"var(--r)", cursor:"pointer",
+                        userSelect:"none", opacity: isChecked ? 0.5 : 1, transition:"all .15s" }}>
+                      <div style={{ width:18, height:18, flexShrink:0, borderRadius:3,
+                        border:`2px solid ${isChecked ? "var(--ink3)" : "var(--rule)"}`,
+                        background: isChecked ? "var(--accent)" : "var(--white)",
+                        display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        {isChecked && (
+                          <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                            <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="2"
+                              strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        )}
+                      </div>
+                      <span style={{ fontSize:13, color:"var(--ink2)" }}>{item}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Nutrition — free text, this is personal, not a generic checklist */}
+      <div style={{ marginBottom:8, border:"1px solid var(--rule)", borderRadius:"var(--r)", overflow:"hidden" }}>
+        <button onClick={() => toggleCat("nutrition")}
+          style={{ width:"100%", padding:"12px 14px", background:"var(--white)",
+            border:"none", cursor:"pointer", display:"flex", alignItems:"center",
+            justifyContent:"space-between", textAlign:"left" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ fontSize:18 }}>🍽️</span>
+            <span style={{ fontSize:14, fontWeight:700, color:"var(--ink)" }}>Eating & Drinking</span>
+          </div>
+          <span style={{ fontSize:11, color:"var(--ink4)" }}>{openCats.has("nutrition") ? "▲" : "▼"}</span>
+        </button>
+        {openCats.has("nutrition") && (
+          <div style={{ padding:"4px 14px 14px", display:"flex", flexDirection:"column", gap:12 }}>
+            {PREP_NOTE_FIELDS.map(f => (
+              <div key={f.id}>
+                <label style={{ fontSize:12, fontWeight:700, color:"var(--ink2)",
+                  display:"block", marginBottom:4 }}>{f.label}</label>
+                <input className="inp" type="text" placeholder={f.placeholder}
+                  value={notes[f.id] || ""} onChange={e => setNote(f.id, e.target.value)} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
   if (validLegs.length === 0 || !strategy.targetHours) return null;
 
@@ -6710,6 +6979,16 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
         </div>
       </div>
 
+      {/* ── Actual intake — what your picks + timing really deliver ── */}
+      {plan.overallFuelMessage && (
+        <div style={{ padding:"10px 14px", background:"var(--white)",
+          border:"1px solid var(--rule)", borderRadius:"var(--r)", marginBottom:16 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)",
+            textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>Your actual intake</div>
+          <div style={{ fontSize:13, color:"var(--ink)", lineHeight:1.5 }}>{plan.overallFuelMessage}</div>
+        </div>
+      )}
+
       {/* ── Per-leg breakdown ───────────────────────────────── */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
         marginBottom:8 }}>
@@ -6792,12 +7071,26 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
                 {/* Drink mix note */}
                 {leg.drinkMixNote && (
                   <div style={{ padding:"7px 14px", background:"rgba(0,240,255,0.08)",
-                    borderBottom:"1px solid #BBDEFB",
+                    borderBottom:"1px solid var(--rule)",
                     display:"flex", alignItems:"center", gap:8 }}>
                     <span style={{ fontSize:13, flexShrink:0 }}>💧</span>
                     <span style={{ fontSize:11, color:"#1565C0", lineHeight:1.4 }}>
                       {leg.drinkMixNote}
                     </span>
+                  </div>
+                )}
+
+                {/* Fuel timing + actual-vs-recommended */}
+                {leg.fuelMessage && (
+                  <div style={{ padding:"7px 14px", background:"var(--bg)",
+                    borderBottom:"1px solid var(--rule)" }}>
+                    <div style={{ fontSize:10, color:"var(--ink4)", marginBottom:2 }}>
+                      Every {leg.activeIntervalMins}min
+                      {leg.activeIntervalMins === leg.recommendedIntervalMins ? " (auto)" : " (your setting)"}
+                    </div>
+                    <div style={{ fontSize:11, color:"var(--ink2)", lineHeight:1.4 }}>
+                      {leg.fuelMessage}
+                    </div>
                   </div>
                 )}
 
