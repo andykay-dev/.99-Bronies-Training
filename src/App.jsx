@@ -5292,7 +5292,7 @@ function RunPlannerScreen({ nutritionLib = [], onBack }) {
           <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:8, marginBottom:12 }}>
             {[
               { label:"Est. time",    value: plan.durationFmt,              sub:"at your target pace" },
-              { label:"Total carbs",  value: plan.carbsG > 0 ? `${plan.carbsG}g` : "None", sub:"required" },
+              { label:"Total carbs",  value: plan.carbsG > 0 ? `${plan.actualCarbsG}g` : "None", sub: plan.carbsG > 0 ? `target ~${plan.carbsG}g` : "required" },
               { label:"Fluid",        value: `${plan.fluidMl}ml`,           sub:"to carry/drink" },
               { label:"Fuel items",   value: plan.vestItems || "—",         sub:"in vest" },
             ].map(({ label, value, sub }) => (
@@ -6733,14 +6733,42 @@ const PREP_NOTE_FIELDS = [
 
 function PrepChecklistSection({ race, racePlan, onChange }) {
   const [openCats, setOpenCats] = useState(new Set());
+  const [draftText, setDraftText] = useState({}); // catId -> in-progress "add item" text
 
-  const checked = race.prepChecklist || {};
-  const notes   = race.prepNotes || {};
+  const checked      = race.prepChecklist || {};
+  const notes         = race.prepNotes || {};
+  const hiddenItems   = race.prepHiddenItems || {};  // catId -> [suggested items dismissed]
+  const customItems   = race.prepCustomItems || {};  // catId -> [items the user added]
+
+  // The suggested defaults plus whatever's been added, minus whatever's
+  // been dismissed — these are suggestions, not a fixed list.
+  function itemsFor(cat) {
+    const hidden = hiddenItems[cat.id] || [];
+    const added  = customItems[cat.id] || [];
+    return [...cat.items.filter(item => !hidden.includes(item)), ...added];
+  }
 
   function toggleItem(catId, item) {
     const key = `${catId}:${item}`;
     onChange({ ...racePlan, race: { ...race,
       prepChecklist: { ...checked, [key]: !checked[key] } } });
+  }
+  function removeItem(cat, item) {
+    const isDefault = cat.items.includes(item);
+    const patch = isDefault
+      ? { prepHiddenItems: { ...hiddenItems, [cat.id]: [...(hiddenItems[cat.id] || []), item] } }
+      : { prepCustomItems: { ...customItems, [cat.id]: (customItems[cat.id] || []).filter(i => i !== item) } };
+    // Also clear its checked state and drop the key entirely, tidy rather than leaving orphans.
+    const nextChecked = { ...checked };
+    delete nextChecked[`${cat.id}:${item}`];
+    onChange({ ...racePlan, race: { ...race, ...patch, prepChecklist: nextChecked } });
+  }
+  function addItem(catId) {
+    const text = (draftText[catId] || "").trim();
+    if (!text) return;
+    onChange({ ...racePlan, race: { ...race,
+      prepCustomItems: { ...customItems, [catId]: [...(customItems[catId] || []), text] } } });
+    setDraftText({ ...draftText, [catId]: "" });
   }
   function setNote(fieldId, value) {
     onChange({ ...racePlan, race: { ...race,
@@ -6752,8 +6780,10 @@ function PrepChecklistSection({ race, racePlan, onChange }) {
     setOpenCats(next);
   }
 
-  const totalItems   = PREP_CATEGORIES.reduce((sum, c) => sum + c.items.length, 0);
-  const totalChecked = Object.values(checked).filter(Boolean).length;
+  const allVisibleItems = PREP_CATEGORIES.flatMap(itemsFor);
+  const totalItems       = allVisibleItems.length;
+  const totalChecked     = PREP_CATEGORIES.reduce((sum, c) =>
+    sum + itemsFor(c).filter(item => checked[`${c.id}:${item}`]).length, 0);
 
   return (
     <div>
@@ -6768,12 +6798,14 @@ function PrepChecklistSection({ race, racePlan, onChange }) {
       </div>
       <div style={{ fontSize:12, color:"var(--ink3)", fontStyle:"italic", marginBottom:14, lineHeight:1.5 }}>
         Everything that isn't race gear — pack it, prep it, don't forget it at 4am.
+        These are suggestions — add your own, remove what doesn't apply to you.
       </div>
 
       {PREP_CATEGORIES.map(cat => {
-        const catCheckedCount = cat.items.filter(item => checked[`${cat.id}:${item}`]).length;
+        const items = itemsFor(cat);
+        const catCheckedCount = items.filter(item => checked[`${cat.id}:${item}`]).length;
         const isOpen = openCats.has(cat.id);
-        const isDone = catCheckedCount === cat.items.length;
+        const isDone = items.length > 0 && catCheckedCount === items.length;
         return (
           <div key={cat.id} style={{ marginBottom:8, border:"1px solid var(--rule)",
             borderRadius:"var(--r)", overflow:"hidden" }}>
@@ -6788,37 +6820,56 @@ function PrepChecklistSection({ race, racePlan, onChange }) {
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                 <span style={{ fontSize:12, fontWeight:700,
                   color: isDone ? "var(--accent)" : "var(--ink4)" }}>
-                  {isDone ? "✓ " : ""}{catCheckedCount}/{cat.items.length}
+                  {isDone ? "✓ " : ""}{catCheckedCount}/{items.length}
                 </span>
                 <span style={{ fontSize:11, color:"var(--ink4)" }}>{isOpen ? "▲" : "▼"}</span>
               </div>
             </button>
             {isOpen && (
               <div style={{ padding:"4px 12px 12px" }}>
-                {cat.items.map(item => {
+                {items.map(item => {
                   const key = `${cat.id}:${item}`;
                   const isChecked = !!checked[key];
                   return (
                     <div key={item}
-                      onClick={() => toggleItem(cat.id, item)}
-                      style={{ display:"flex", alignItems:"center", gap:10,
-                        padding:"8px 8px", borderRadius:"var(--r)", cursor:"pointer",
-                        userSelect:"none", opacity: isChecked ? 0.5 : 1, transition:"all .15s" }}>
-                      <div style={{ width:18, height:18, flexShrink:0, borderRadius:3,
-                        border:`2px solid ${isChecked ? "var(--ink3)" : "var(--rule)"}`,
-                        background: isChecked ? "var(--accent)" : "var(--white)",
-                        display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        {isChecked && (
-                          <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                            <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="2"
-                              strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        )}
+                      style={{ display:"flex", alignItems:"center", gap:4 }}>
+                      <div
+                        onClick={() => toggleItem(cat.id, item)}
+                        style={{ flex:1, display:"flex", alignItems:"center", gap:10,
+                          padding:"8px 8px", borderRadius:"var(--r)", cursor:"pointer",
+                          userSelect:"none", opacity: isChecked ? 0.5 : 1, transition:"all .15s" }}>
+                        <div style={{ width:18, height:18, flexShrink:0, borderRadius:3,
+                          border:`2px solid ${isChecked ? "var(--ink3)" : "var(--rule)"}`,
+                          background: isChecked ? "var(--accent)" : "var(--white)",
+                          display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          {isChecked && (
+                            <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                              <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="2"
+                                strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </div>
+                        <span style={{ fontSize:13, color:"var(--ink2)" }}>{item}</span>
                       </div>
-                      <span style={{ fontSize:13, color:"var(--ink2)" }}>{item}</span>
+                      <button onClick={() => removeItem(cat, item)}
+                        title="Remove from this list"
+                        style={{ background:"none", border:"none", cursor:"pointer",
+                          color:"var(--ink4)", fontSize:14, padding:"4px 8px", flexShrink:0 }}>
+                        ✕
+                      </button>
                     </div>
                   );
                 })}
+                {/* Add your own */}
+                <div style={{ display:"flex", gap:6, marginTop:6, paddingTop:8,
+                  borderTop:"1px dashed var(--rule)" }}>
+                  <input className="inp" type="text" placeholder="Add your own item…"
+                    style={{ flex:1, fontSize:13 }}
+                    value={draftText[cat.id] || ""}
+                    onChange={e => setDraftText({ ...draftText, [cat.id]: e.target.value })}
+                    onKeyDown={e => { if (e.key === "Enter") addItem(cat.id); }} />
+                  <button onClick={() => addItem(cat.id)} className="btn btn-g btn-sm">+ Add</button>
+                </div>
               </div>
             )}
           </div>
@@ -6885,6 +6936,21 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
 
   function clearGear() {
     onChange({ ...racePlan, race: { ...race, gearChecked: [] } });
+  }
+
+  // Update the race-day note for the Nth VALID leg (as shown on this screen)
+  // — maps back to its real position in the raw race.legs array, since that
+  // array may contain other in-progress/invalid leg rows this screen skips.
+  function updateLegNote(validLegIdx, note) {
+    let count = -1;
+    const rawIdx = (race.legs || []).findIndex(l => {
+      if ((parseFloat(l.km) || 0) > 0) count++;
+      return count === validLegIdx;
+    });
+    if (rawIdx === -1) return;
+    const nextLegs = [...race.legs];
+    nextLegs[rawIdx] = { ...nextLegs[rawIdx], raceNote: note };
+    onChange({ ...racePlan, race: { ...race, legs: nextLegs } });
   }
 
   // Format pace as "7:12 /km"
@@ -7052,7 +7118,7 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)",
                   borderBottom:"1px solid var(--rule)" }}>
                   {[
-                    { label:"Carbs",  value:`${leg.carbsG}g`,   sub:"total needed" },
+                    { label:"Carbs",  value:`${leg.actualCarbsG}g`, sub:`target ~${leg.carbsG}g` },
                     { label:"Fluid",  value:`${leg.fluidMl}ml`, sub:"required"     },
                     { label:"Solids", value:leg.vestItems,       sub:"carry in vest"},
                     { label:"Flasks", value:leg.flasks,          sub:"for fluid"    },
@@ -7126,6 +7192,19 @@ function RacePlanOutput({ race, strategy, validLegs, onChange, racePlan }) {
                     )}
                   </div>
                 )}
+
+                {/* Your own notes — painkillers, skip this one, crew meetup, whatever's yours */}
+                <div style={{ padding:"10px 14px", borderTop:"1px solid var(--rule)" }}>
+                  <label style={{ fontSize:10, fontWeight:700, color:"var(--ink3)",
+                    textTransform:"uppercase", letterSpacing:.5, display:"block", marginBottom:5 }}>
+                    📝 Your notes
+                  </label>
+                  <textarea className="inp" rows={2}
+                    style={{ resize:"vertical", fontFamily:"inherit", fontSize:12, lineHeight:1.5 }}
+                    placeholder="e.g. Take extra painkillers here · Skip this one, too close to the last · Crew meets us here"
+                    value={validLegs[i]?.raceNote || ""}
+                    onChange={e => updateLegNote(i, e.target.value)} />
+                </div>
               </>
             )}
           </div>
@@ -9363,9 +9442,26 @@ export default function App() {
             <button onClick={() => setScreen("onboarding")} className="btn btn-o" style={{width:"100%",marginBottom:10}}>
               ✏ Edit event / goal
             </button>
+            <div style={{fontSize:10,color:"var(--ink4)",marginTop:-4,marginBottom:10,paddingLeft:2}}>
+              Keeps your current answers pre-filled — use this to tweak details.
+            </div>
+            {event && (
+              <>
+                <button onClick={clearEvent} className="btn btn-g btn-sm" style={{width:"100%",marginBottom:4}}>
+                  🗑 Clear event &amp; start over
+                </button>
+                <div style={{fontSize:10,color:"var(--ink4)",marginBottom:16,paddingLeft:2}}>
+                  Wipes the current event and takes you back through onboarding from scratch.
+                  Your profile and pace data stay.
+                </div>
+              </>
+            )}
             <button onClick={resetAll} className="btn btn-g btn-sm" style={{width:"100%",marginBottom:16}}>
               🗑 Reset everything
             </button>
+            <div style={{fontSize:10,color:"var(--ink4)",marginTop:-12,marginBottom:16,paddingLeft:2}}>
+              Also clears your profile and pace data — starts completely fresh.
+            </div>
 
             {/* ── Local Profiles (dev / family switcher) ───────────── */}
             <ProfileSwitcher />
