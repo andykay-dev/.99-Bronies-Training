@@ -8967,17 +8967,19 @@ export default function App() {
   function clearEvent() {
     setConfirmCfg({
       title:"Clear current event?",
-      message:"This removes your event and training plan. Your profile and pace data will stay.",
+      message:"This removes your event, training plan, and everything in Event Setup (legs, fuelling, gear, checklist). Your profile and pace data will stay.",
       confirmLabel:"Yes, clear event",
       danger:true,
       onConfirm: async () => {
         setEvent(null); setPlan([]); setFeedbackMap({});
         setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
+        setRacePlanState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
         try { await store.delete("bep6_event"); } catch {}
         try { await store.delete("bep6_fb"); } catch {}
         try { await store.delete("bep6_overrides"); } catch {}
         try { await store.delete("bep6_slots"); } catch {}
         try { await store.delete("bep6_completions"); } catch {}
+        try { await store.delete("bep6_racePlan"); } catch {}
         setConfirmCfg(null);
         showToast("Event cleared");
       },
@@ -8993,6 +8995,7 @@ export default function App() {
       onConfirm: async () => {
         setProfile(null); setEvent(null); setPlan([]); setFeedbackMap({});
         setSessionOverrides({}); setDaySlotOverrides({}); setCompletionMap({});
+        setRacePlanState({ race: { title:"", date:"", legs:[] }, strategy: DEFAULT_STRATEGY });
         try {
           await store.delete("bep6_profile");
           await store.delete("bep6_event");
@@ -9000,6 +9003,7 @@ export default function App() {
           await store.delete("bep6_overrides");
           await store.delete("bep6_slots");
           await store.delete("bep6_completions");
+          await store.delete("bep6_racePlan");
         } catch {}
         setConfirmCfg(null);
         setScreen("welcome");
