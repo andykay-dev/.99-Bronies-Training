@@ -2392,9 +2392,14 @@ const store = {
           .eq("app_id", APP_ID)
           .eq("key", key)
           .maybeSingle();
-        if (!error && data) {
+        if (!error && data && data.value !== null) {
           const v = data.value;
           return { value: typeof v === "string" ? v : JSON.stringify(v) };
+        }
+        if (!error && data && data.value === null) {
+          // Explicit null = cleared via the delete-fallback upsert — treat
+          // exactly like "no row found", not like a real stored value.
+          return null;
         }
       } catch {}
     }
@@ -2422,11 +2427,31 @@ const store = {
   async delete(key) {
     const uid = await getUid();
     if (uid) {
+      let deleteError = null;
       try {
-        await supabase.from("app_data")
+        const { error } = await supabase.from("app_data")
           .delete()
           .eq("user_id", uid).eq("app_id", APP_ID).eq("key", key);
-      } catch {}
+        deleteError = error;
+      } catch (e) { deleteError = e; }
+
+      if (deleteError) {
+        // DELETE was blocked (commonly a missing RLS policy or table GRANT
+        // for delete specifically — SELECT/INSERT/UPDATE can be fine while
+        // DELETE alone is missing). Fall back to overwriting the row with
+        // an explicit null value via upsert, the same UPDATE path profile
+        // and plan saves already rely on successfully. This guarantees the
+        // stale value is gone even if the row itself can't be removed.
+        console.warn(`[store.delete] "${key}" blocked, falling back to upsert-null:`, deleteError.message || deleteError);
+        try {
+          await supabase.from("app_data").upsert({
+            user_id: uid, app_id: APP_ID, key,
+            value: null, updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id,app_id,key" });
+        } catch (e2) {
+          console.warn(`[store.delete] upsert-null fallback also failed for "${key}":`, e2);
+        }
+      }
     }
     try { localStorage.removeItem(`${slugPrefix(_activeSlug)}${key}`); } catch {}
     return { deleted: true };
