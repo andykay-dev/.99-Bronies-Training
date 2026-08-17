@@ -190,6 +190,16 @@ const G = () => {
       html,body{background:var(--bg);font-family:var(--sans);color:var(--ink);
         -webkit-text-size-adjust:100%;text-size-adjust:100%;transition:background .3s,color .3s;
         font-size:14px;}
+      /* Standalone Home Screen mode draws content full-bleed behind the
+         status bar (notch/Dynamic Island) and the bottom home-indicator bar
+         — env(safe-area-inset-*) resolves to the real value per device and
+         to 0 on devices with neither (iPhone SE), so this is safe everywhere. */
+      body{
+        padding-top:env(safe-area-inset-top);
+        padding-bottom:env(safe-area-inset-bottom);
+        padding-left:env(safe-area-inset-left);
+        padding-right:env(safe-area-inset-right);
+      }
       input,select,textarea,button{font-family:var(--sans);}
 
       /* Tighten layout on very small screens (iPhone SE etc.) */
@@ -1267,7 +1277,7 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                                       cursor: disabled ? "not-allowed" : "pointer",
                                       borderRadius:"var(--r)",
                                       border:`2px solid ${isActive ? SLOT_TYPES.workout.color : "var(--rule)"}`,
-                                      background: isActive ? SLOT_TYPES.workout.color : "white",
+                                      background: isActive ? SLOT_TYPES.workout.color : "var(--white)",
                                       color: isActive ? "white" : "var(--ink3)",
                                       opacity: disabled ? 0.35 : 1,
                                       transition:"all .15s"}}>
@@ -1560,7 +1570,7 @@ function WeeklyFeedback({ weekNum, existing, onSave }) {
           <button key={o.value} onClick={() => { setChoice(o.value); setSaved(false); }}
             style={{flex:1,padding:"9px 4px",fontSize:12,fontWeight:600,cursor:"pointer",
               borderRadius:"var(--r)",border:`1.5px solid ${choice===o.value?o.col:"var(--rule)"}`,
-              background:choice===o.value?o.bg:"white",color:choice===o.value?o.col:"var(--ink3)",transition:"all .15s"}}>
+              background:choice===o.value?o.bg:"var(--white)",color:choice===o.value?o.col:"var(--ink3)",transition:"all .15s"}}>
             {o.label}
           </button>
         ))}
@@ -1582,7 +1592,87 @@ function WeeklyFeedback({ weekNum, existing, onSave }) {
 // ─────────────────────────────────────────────────────────────
 //  UI: Week detail modal
 // ─────────────────────────────────────────────────────────────
-function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, feedbackMap, onClose, paces, completionMap, onCompletion }) {
+// ─────────────────────────────────────────────────────────────
+//  CALENDAR EXPORT — "Add to Calendar" for a training week
+//  Generates a standard .ics file with one event per active session.
+//  iOS Safari, Android, Google Calendar and Outlook all recognise this
+//  file type natively and offer a one-tap import — no calendar
+//  permissions or native app needed, it's just a downloadable file.
+// ─────────────────────────────────────────────────────────────
+function icsEscape(text) {
+  return String(text || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n");
+}
+function icsDateStamp(date) {
+  // All-day-ish training events: use a floating local date (no time
+  // component), so it lands on the right calendar day regardless of the
+  // device's timezone.
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
+function buildWeekICS(week) {
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//BRONIES .99 Training//EN",
+    "CALSCALE:GREGORIAN",
+  ];
+
+  DAYS.forEach((d, idx) => {
+    const s = week.sessions?.[d.id];
+    if (!s || s.wtype === "rest" || !(s.distance > 0 || s.estMins > 0)) return;
+
+    const date = dayDate(week.startDate, idx);
+    if (!date) return;
+    const dateStamp = icsDateStamp(date);
+    // All-day event: DTSTART/DTEND as DATE (not DATE-TIME), end = next day
+    // per the iCal all-day convention (end date is exclusive).
+    const endDate = new Date(date);
+    endDate.setDate(endDate.getDate() + 1);
+    const endStamp = icsDateStamp(endDate);
+
+    const title = s.distance > 0 ? `🏃 ${s.label} — ${s.distance}km` : `🏃 ${s.label}`;
+    const descParts = [s.summary, s.detail].filter(Boolean);
+
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:bronies-${week.weekNum}-${d.id}-${dateStamp}@99-bronies-training`,
+      `DTSTAMP:${dateStamp}T000000Z`,
+      `DTSTART;VALUE=DATE:${dateStamp}`,
+      `DTEND;VALUE=DATE:${endStamp}`,
+      `SUMMARY:${icsEscape(title)}`,
+      descParts.length ? `DESCRIPTION:${icsEscape(descParts.join("\\n\\n"))}` : null,
+      "END:VEVENT",
+    );
+  });
+
+  lines.push("END:VCALENDAR");
+  return lines.filter(Boolean).join("\r\n");
+}
+
+function addWeekToCalendar(week) {
+  const ics = buildWeekICS(week);
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  // iOS Safari recognises a navigated-to .ics URL and opens the native
+  // "Add to Calendar" sheet directly; other browsers fall back to a normal
+  // file download that the OS then offers to import.
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `bronies-week-${week.weekNum}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, feedbackMap, onClose, paces, completionMap, onCompletion, isWeekStartPrompt }) {
   const ph = PHASES[week.phase] || PHASES.BASE;
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:200,
@@ -1601,6 +1691,19 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
             boxShadow:"0 2px 8px rgba(0,0,0,0.15)",marginBottom:-32,marginLeft:"auto"}}>
           ✕
         </button>
+        {isWeekStartPrompt && (
+          <div style={{background:"var(--accent-light)",border:"2px solid var(--accent)",
+            borderRadius:"var(--r)",padding:"12px 14px",marginBottom:14}}>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--accent)",marginBottom:4}}>
+              📅 Here's your week — does this look okay with your schedule?
+            </div>
+            <div style={{fontSize:12,color:"var(--ink2)",lineHeight:1.5}}>
+              Move anything around that doesn't fit, then add the whole week to your calendar in one go.
+              Move things later in the week and the app stays right — but the calendar won't update itself,
+              so if plans shift mid-week you'll want to adjust those events by hand.
+            </div>
+          </div>
+        )}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
           <div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:4}}>
@@ -1620,6 +1723,15 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
             <div style={{fontSize:22,fontWeight:700,color:"var(--accent)"}}>{week.totalKm || 0}km</div>
             {week.longRunMins > 0 && (
               <div style={{fontSize:11,color:"var(--ink4)"}}>long run ≈{fmtDuration(week.longRunMins)}</div>
+            )}
+            {!isWeekStartPrompt && (
+              <button onClick={() => addWeekToCalendar(week)}
+                style={{marginTop:6,padding:"5px 10px",fontSize:11,fontWeight:700,
+                  borderRadius:"var(--r)",cursor:"pointer",border:"1px solid var(--rule)",
+                  background:"var(--bg)",color:"var(--ink3)",display:"inline-flex",
+                  alignItems:"center",gap:5}}>
+                📅 Add to Calendar
+              </button>
             )}
           </div>
         </div>
@@ -1657,6 +1769,14 @@ function WeekDetail({ week, onEdit, onDaySlotChange, onSwapDays, onFeedback, fee
             onDaySlotChange={(dayId, slot, subtype) => onDaySlotChange && onDaySlotChange(week.weekNum, dayId, slot, subtype)}
             onSwapDays={(dayIdA, slotA, dayIdB, slotB) => onSwapDays && onSwapDays(week.weekNum, dayIdA, slotA, dayIdB, slotB)}/>
         ))}
+        {isWeekStartPrompt && (
+          <button onClick={() => { addWeekToCalendar(week); onClose(); }}
+            style={{width:"100%",marginTop:4,marginBottom:16,padding:"14px 0",fontSize:15,
+              fontWeight:700,borderRadius:"var(--r)",border:"none",cursor:"pointer",
+              background:"var(--accent)",color:"#fff"}}>
+            ✓ Looks good — Add Week to Calendar
+          </button>
+        )}
         {!week.isRaceWeek && (
           <WeeklyFeedback weekNum={week.weekNum} existing={feedbackMap[week.weekNum]} onSave={onFeedback}/>
         )}
@@ -2412,13 +2532,25 @@ const store = {
   async set(key, value) {
     const uid = await getUid();
     if (uid) {
-      try {
-        let jsonVal; try { jsonVal = JSON.parse(value); } catch { jsonVal = value; }
-        await supabase.from("app_data").upsert({
-          user_id: uid, app_id: APP_ID, key,
-          value: jsonVal, updated_at: new Date().toISOString(),
-        }, { onConflict: "user_id,app_id,key" });
-      } catch {}
+      let jsonVal; try { jsonVal = JSON.parse(value); } catch { jsonVal = value; }
+      const doUpsert = () => supabase.from("app_data").upsert({
+        user_id: uid, app_id: APP_ID, key,
+        value: jsonVal, updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,app_id,key" });
+
+      let setError = null;
+      try { const { error } = await doUpsert(); setError = error; }
+      catch (e) { setError = e; }
+
+      if (setError) {
+        // Upsert is idempotent — safe to retry once before giving up.
+        console.warn(`[store.set] "${key}" failed, retrying once:`, setError.message || setError);
+        try { const { error } = await doUpsert(); setError = error; }
+        catch (e) { setError = e; }
+        if (setError) {
+          console.warn(`[store.set] "${key}" failed after retry — cloud copy is stale. Only localStorage saved this time.`, setError.message || setError);
+        }
+      }
     }
     try { localStorage.setItem(`${slugPrefix(_activeSlug)}${key}`, value); } catch {}
     return { value };
@@ -2724,6 +2856,7 @@ function FeedbackWidget({ currentScreen, open, onClose }) {
         onClick={e => e.target===e.currentTarget && close()}>
         <div style={{background:"var(--white)",borderRadius:"12px 12px 0 0",width:"100%",
           maxWidth:560,maxHeight:"90vh",overflowY:"auto",
+          paddingBottom:"env(safe-area-inset-bottom)",
           borderTop:"4px solid var(--accent)",boxShadow:"0 -4px 40px rgba(0,0,0,.3)"}}>
 
           {/* Header — always visible */}
@@ -2931,13 +3064,13 @@ function DisclaimerModal({ onAccept, onDecline }) {
           </div>
           <div onClick={() => setStamped(s => !s)}
             style={{cursor:"pointer",border:`2px solid ${stamped?"var(--accent)":"var(--rule)"}`,
-              borderRadius:"var(--r)",padding:"14px 16px",background:stamped?"var(--accent-light)":"white",
+              borderRadius:"var(--r)",padding:"14px 16px",background:stamped?"var(--accent-light)":"var(--white)",
               display:"flex",alignItems:"center",gap:14,transition:"all .2s",
               userSelect:"none"}}>
             {/* Big checkbox / stamp */}
             <div style={{width:36,height:36,borderRadius:6,flexShrink:0,
               border:`2.5px solid ${stamped?"var(--accent)":"var(--rule)"}`,
-              background:stamped?"var(--accent)":"white",
+              background:stamped?"var(--accent)":"var(--white)",
               display:"flex",alignItems:"center",justifyContent:"center",
               transition:"all .2s",fontSize:20}}>
               {stamped ? "✓" : ""}
@@ -4221,13 +4354,16 @@ function HangoutView({ profile, plan, onSelectWeek }) {
 //  Convert between pace, speed, distance and finish time.
 // ─────────────────────────────────────────────────────────────
 function PaceCalculatorScreen({ onBack }) {
-  const [distKm,     setDistKm]     = useState("10");
-  const [paceMin,    setPaceMin]    = useState("5");
-  const [paceSec,    setPaceSec]    = useState("00");
-  const [timeHr,     setTimeHr]     = useState("");
-  const [timeMin,    setTimeMin]    = useState("");
-  const [timeSec,    setTimeSec]    = useState("");
-  const [mode,       setMode]       = useState("pace"); // "pace" or "time"
+  const [distKm,   setDistKm]   = useState("10");
+  const [paceMin,  setPaceMin]  = useState("");
+  const [paceSec,  setPaceSec]  = useState("");
+  const [timeHr,   setTimeHr]   = useState("");
+  const [timeMin,  setTimeMin]  = useState("55");
+  const [timeSec,  setTimeSec]  = useState("");
+  // Whichever of pace/time the user most recently typed into — that one
+  // stays as their input, the other is always recalculated from it. Editing
+  // distance recalculates the non-driver field from whichever this is.
+  const [driver,   setDriver]   = useState("time"); // "pace" | "time"
 
   const COMMON = [
     { label:"5km",     km:5 },
@@ -4238,10 +4374,7 @@ function PaceCalculatorScreen({ onBack }) {
     { label:"50km",    km:50 },
   ];
 
-  // Derived values
-  const dist    = parseFloat(distKm) || 0;
-  const paceS   = (parseInt(paceMin,10)||0)*60 + (parseInt(paceSec,10)||0);
-  const totalTimeS = (parseInt(timeHr,10)||0)*3600 + (parseInt(timeMin,10)||0)*60 + (parseInt(timeSec,10)||0);
+  const dist = parseFloat(distKm) || 0;
 
   function fmtTime(sec) {
     if (!sec || sec <= 0) return "--:--:--";
@@ -4251,25 +4384,70 @@ function PaceCalculatorScreen({ onBack }) {
     if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
     return `${m}:${String(s).padStart(2,"0")}`;
   }
-  function fmtPaceLocal(secPerKm) {
-    if (!secPerKm || secPerKm <= 0) return "--:--";
-    const m = Math.floor(secPerKm / 60);
-    const s = Math.round(secPerKm % 60);
-    return `${m}:${String(s).padStart(2,"0")}`;
+
+  // ── Recalculation ──────────────────────────────────────────
+  // Pace is the driver: derive total time from distance × pace, then push
+  // that into the time fields (formatted) so they visibly update.
+  function pushTimeFromPace(newPaceS, useDist) {
+    const d = useDist ?? dist;
+    if (d <= 0 || newPaceS <= 0) { setTimeHr(""); setTimeMin(""); setTimeSec(""); return; }
+    const totalS = d * newPaceS;
+    const h = Math.floor(totalS / 3600);
+    const m = Math.floor((totalS % 3600) / 60);
+    const s = Math.round(totalS % 60);
+    setTimeHr(h > 0 ? String(h) : "");
+    setTimeMin(String(m));
+    setTimeSec(String(s));
+  }
+  // Time is the driver: derive pace from distance ÷ total time, push into pace fields.
+  function pushPaceFromTime(newTotalS, useDist) {
+    const d = useDist ?? dist;
+    if (d <= 0 || newTotalS <= 0) { setPaceMin(""); setPaceSec(""); return; }
+    const paceS = newTotalS / d;
+    const m = Math.floor(paceS / 60);
+    const s = Math.round(paceS % 60);
+    setPaceMin(String(m));
+    setPaceSec(String(s));
   }
 
-  // Compute the "answer"
-  const derivedTimeS  = mode === "pace" && dist > 0 && paceS > 0  ? dist * paceS : 0;
-  const derivedPaceS  = mode === "time" && dist > 0 && totalTimeS > 0 ? totalTimeS / dist : 0;
-  const speedKph      = mode === "pace"
-    ? (paceS > 0 ? 3600 / paceS : 0)
-    : (dist > 0 && totalTimeS > 0 ? dist / (totalTimeS / 3600) : 0);
+  function handleDistChange(v) {
+    setDistKm(v);
+    const d = parseFloat(v) || 0;
+    if (driver === "pace") {
+      const paceS = (parseInt(paceMin,10)||0)*60 + (parseInt(paceSec,10)||0);
+      pushTimeFromPace(paceS, d);
+    } else {
+      const totalS = (parseInt(timeHr,10)||0)*3600 + (parseInt(timeMin,10)||0)*60 + (parseInt(timeSec,10)||0);
+      pushPaceFromTime(totalS, d);
+    }
+  }
+  function handlePaceChange(minVal, secVal) {
+    setDriver("pace");
+    const paceS = (parseInt(minVal,10)||0)*60 + (parseInt(secVal,10)||0);
+    pushTimeFromPace(paceS);
+  }
+  function handleTimeChange(hVal, mVal, sVal) {
+    setDriver("time");
+    const totalS = (parseInt(hVal,10)||0)*3600 + (parseInt(mVal,10)||0)*60 + (parseInt(sVal,10)||0);
+    pushPaceFromTime(totalS);
+  }
 
-  // Splits for common distances
-  const commonSplits = COMMON.map(c => {
-    const s = mode === "pace" && paceS > 0 ? c.km * paceS : mode === "time" && derivedPaceS > 0 ? c.km * derivedPaceS : 0;
-    return { label: c.label, time: s };
-  });
+  // Run the initial calc once on mount (time="55" drives pace for dist="10")
+  useEffect(() => {
+    const totalS = (parseInt(timeHr,10)||0)*3600 + (parseInt(timeMin,10)||0)*60 + (parseInt(timeSec,10)||0);
+    pushPaceFromTime(totalS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const paceS      = (parseInt(paceMin,10)||0)*60 + (parseInt(paceSec,10)||0);
+  const totalTimeS = (parseInt(timeHr,10)||0)*3600 + (parseInt(timeMin,10)||0)*60 + (parseInt(timeSec,10)||0);
+  const speedKph   = paceS > 0 ? 3600 / paceS : 0;
+
+  // Splits for common distances, always driven by the current pace
+  const commonSplits = COMMON.map(c => ({
+    label: c.label,
+    time: paceS > 0 ? c.km * paceS : 0,
+  }));
 
   return (
     <div style={{ padding:"var(--pad-x)", paddingBottom:40 }}>
@@ -4283,34 +4461,18 @@ function PaceCalculatorScreen({ onBack }) {
       <div style={{ fontFamily:"var(--display)", fontSize:26, letterSpacing:1, marginBottom:4 }}>
         Pace Calculator
       </div>
-      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:20 }}>
-        Convert between pace, speed and finish time.
-      </div>
-
-      {/* Mode toggle */}
-      <div style={{ display:"flex", gap:6, marginBottom:16 }}>
-        {[
-          { id:"pace", label:"Pace → Finish time" },
-          { id:"time", label:"Finish time → Pace" },
-        ].map(t => (
-          <button key={t.id} onClick={() => setMode(t.id)}
-            style={{ flex:1, padding:"9px 8px", borderRadius:"var(--r)", cursor:"pointer",
-              border:`2px solid ${mode===t.id?"var(--accent)":"var(--rule)"}`,
-              background: mode===t.id?"var(--accent)":"var(--white)",
-              color: mode===t.id?"#fff":"var(--ink3)",
-              fontSize:12, fontWeight:700, transition:"all .15s" }}>
-            {t.label}
-          </button>
-        ))}
+      <div style={{ fontSize:13, color:"var(--ink3)", fontStyle:"italic", marginBottom:20, lineHeight:1.5 }}>
+        Edit any field — the others update to match. Know your goal time but not the pacing?
+        Type the time. Know your pace but not the finish time? Type that instead.
       </div>
 
       {/* Distance */}
-      <div style={{ marginBottom:14 }}>
+      <div style={{ marginBottom:16 }}>
         <label className="lbl">Distance</label>
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
           {COMMON.map(c => (
             <button key={c.label}
-              onClick={() => setDistKm(String(c.km))}
+              onClick={() => handleDistChange(String(c.km))}
               className={`btn btn-o btn-sm${parseFloat(distKm)===c.km?" active":""}`}
               style={{ fontSize:11, padding:"5px 10px" }}>
               {c.label}
@@ -4319,86 +4481,77 @@ function PaceCalculatorScreen({ onBack }) {
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <input className="inp" type="number" min="0.1" max="200" step="0.1"
-            value={distKm} onChange={e => setDistKm(e.target.value)}
+            value={distKm} onChange={e => handleDistChange(e.target.value)}
             style={{ maxWidth:100, fontFamily:"var(--mono)", fontSize:16 }} />
           <span style={{ fontSize:13, color:"var(--ink3)" }}>km</span>
         </div>
       </div>
 
-      {/* Pace input (pace→time mode) */}
-      {mode === "pace" && (
-        <div style={{ marginBottom:14 }}>
-          <label className="lbl">Pace</label>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <input className="inp" type="number" min="2" max="20" step="1"
-              placeholder="5" value={paceMin} onChange={e => setPaceMin(e.target.value)}
-              style={{ maxWidth:64, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
-            <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
-            <input className="inp" type="number" min="0" max="59" step="1"
-              placeholder="00" value={paceSec} onChange={e => setPaceSec(String(e.target.value).padStart(2,"0"))}
-              style={{ maxWidth:64, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
-            <span style={{ fontSize:13, color:"var(--ink3)" }}>min/km</span>
+      {/* Pace — always editable */}
+      <div style={{ marginBottom:16, padding:"12px 14px", borderRadius:"var(--r)",
+        border:`2px solid ${driver==="pace" ? "var(--accent)" : "var(--rule)"}`,
+        background: driver==="pace" ? "var(--accent-light)" : "var(--white)" }}>
+        <label className="lbl" style={{ display:"flex", alignItems:"center", gap:6 }}>
+          Pace
+          {driver==="pace" && <span style={{ fontSize:10, fontWeight:700, color:"var(--accent)" }}>← driving</span>}
+        </label>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <input className="inp" type="number" min="2" max="20" step="1"
+            placeholder="5" value={paceMin} onChange={e => { setPaceMin(e.target.value); handlePaceChange(e.target.value, paceSec); }}
+            style={{ maxWidth:64, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+          <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
+          <input className="inp" type="number" min="0" max="59" step="1"
+            placeholder="00" value={paceSec} onChange={e => { const v = e.target.value; setPaceSec(v); handlePaceChange(paceMin, v); }}
+            style={{ maxWidth:64, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+          <span style={{ fontSize:13, color:"var(--ink3)" }}>min/km</span>
+        </div>
+      </div>
+
+      {/* Time — always editable */}
+      <div style={{ marginBottom:20, padding:"12px 14px", borderRadius:"var(--r)",
+        border:`2px solid ${driver==="time" ? "var(--accent)" : "var(--rule)"}`,
+        background: driver==="time" ? "var(--accent-light)" : "var(--white)" }}>
+        <label className="lbl" style={{ display:"flex", alignItems:"center", gap:6 }}>
+          Finish time
+          {driver==="time" && <span style={{ fontSize:10, fontWeight:700, color:"var(--accent)" }}>← driving</span>}
+        </label>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <input className="inp" type="number" min="0" max="99" step="1"
+            placeholder="h" value={timeHr} onChange={e => { setTimeHr(e.target.value); handleTimeChange(e.target.value, timeMin, timeSec); }}
+            style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+          <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
+          <input className="inp" type="number" min="0" max="59" step="1"
+            placeholder="mm" value={timeMin} onChange={e => { const v = e.target.value; setTimeMin(v); handleTimeChange(timeHr, v, timeSec); }}
+            style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+          <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
+          <input className="inp" type="number" min="0" max="59" step="1"
+            placeholder="ss" value={timeSec} onChange={e => { const v = e.target.value; setTimeSec(v); handleTimeChange(timeHr, timeMin, v); }}
+            style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
+        </div>
+      </div>
+
+      {/* Speed readout */}
+      <div className="card" style={{ padding:"14px 18px", marginBottom:20, background:"var(--navtab)",
+        color:"white", borderRadius:"var(--r)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
+            opacity:.7, marginBottom:2 }}>Speed</div>
+          <div style={{ fontFamily:"var(--mono)", fontSize:22, fontWeight:800 }}>
+            {speedKph > 0 ? `${speedKph.toFixed(2)} km/h` : "—"}
           </div>
         </div>
-      )}
-
-      {/* Time input (time→pace mode) */}
-      {mode === "time" && (
-        <div style={{ marginBottom:14 }}>
-          <label className="lbl">Finish time</label>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <input className="inp" type="number" min="0" max="99" step="1"
-              placeholder="h" value={timeHr} onChange={e => setTimeHr(e.target.value)}
-              style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
-            <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
-            <input className="inp" type="number" min="0" max="59" step="1"
-              placeholder="mm" value={timeMin} onChange={e => setTimeMin(e.target.value)}
-              style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
-            <span style={{ fontSize:16, color:"var(--ink3)" }}>:</span>
-            <input className="inp" type="number" min="0" max="59" step="1"
-              placeholder="ss" value={timeSec} onChange={e => setTimeSec(e.target.value)}
-              style={{ maxWidth:56, fontFamily:"var(--mono)", fontSize:16, textAlign:"center" }} />
-          </div>
-        </div>
-      )}
-
-      {/* Result card */}
-      <div className="card" style={{ padding:"16px 18px", marginBottom:20, background:"var(--navtab)",
-        color:"white", borderRadius:"var(--r)" }}>
-        {mode === "pace" ? (
-          <>
-            <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
-              opacity:.7, marginBottom:4 }}>Finish time</div>
-            <div style={{ fontFamily:"var(--mono)", fontSize:32, fontWeight:800, lineHeight:1 }}>
-              {fmtTime(derivedTimeS)}
-            </div>
-            <div style={{ fontSize:12, opacity:.7, marginTop:6 }}>
-              {speedKph > 0 ? `${speedKph.toFixed(2)} km/h` : ""}
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase",
-              opacity:.7, marginBottom:4 }}>Required pace</div>
-            <div style={{ fontFamily:"var(--mono)", fontSize:32, fontWeight:800, lineHeight:1 }}>
-              {fmtPaceLocal(derivedPaceS)}<span style={{ fontSize:16, opacity:.7 }}> /km</span>
-            </div>
-            <div style={{ fontSize:12, opacity:.7, marginTop:6 }}>
-              {speedKph > 0 ? `${speedKph.toFixed(2)} km/h` : ""}
-            </div>
-          </>
-        )}
+        <div style={{ fontSize:34, opacity:.5 }}>🏃</div>
       </div>
 
       {/* Common distance splits */}
       <div style={{ fontSize:11, fontWeight:700, color:"var(--ink3)", letterSpacing:1.2,
-        textTransform:"uppercase", marginBottom:10 }}>Common splits</div>
+        textTransform:"uppercase", marginBottom:10 }}>Common splits at this pace</div>
       <div style={{ display:"flex", flexDirection:"column", gap:0, border:"1px solid var(--rule)",
         borderRadius:"var(--r)", overflow:"hidden" }}>
         {commonSplits.map((c, i) => (
           <div key={c.label} style={{ display:"flex", alignItems:"center",
             padding:"10px 14px", borderBottom: i < commonSplits.length-1 ? "1px solid var(--rule)" : "none",
-            background:"var(--white)" }}>
+            background: parseFloat(distKm) === COMMON.find(x=>x.label===c.label)?.km ? "var(--accent-light)" : "var(--white)" }}>
             <span style={{ flex:1, fontSize:13, fontWeight:600, color:"var(--ink)" }}>{c.label}</span>
             <span style={{ fontFamily:"var(--mono)", fontSize:14, fontWeight:700,
               color: c.time > 0 ? "var(--accent)" : "var(--ink4)" }}>
@@ -8216,11 +8369,24 @@ function AuthScreen({ onAuth, onSkip, skin }) {
   const [error,    setError]    = useState(null);
   const [sent,     setSent]     = useState(false);
 
+  // Supabase passes raw browser fetch errors straight through as
+  // error.message — "Load failed" (Safari), "Failed to fetch" (Chrome),
+  // "NetworkError..." (Firefox) all mean the request never reached the
+  // server at all. That's a connectivity problem, not a login problem —
+  // show something a person can actually act on instead of the raw string.
+  function friendlyAuthError(message) {
+    const m = (message || "").toLowerCase();
+    if (m.includes("load failed") || m.includes("failed to fetch") || m.includes("networkerror") || m.includes("network request failed")) {
+      return "Couldn't reach the server — check your connection and try again. If you're on wifi with a captive portal or a VPN, that can block this too.";
+    }
+    return message;
+  }
+
   async function handleLogin(e) {
     e.preventDefault();
     setLoading(true); setError(null);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) { setError(error.message); setLoading(false); return; }
+    if (error) { setError(friendlyAuthError(error.message)); setLoading(false); return; }
     onAuth();
   }
 
@@ -8231,7 +8397,7 @@ function AuthScreen({ onAuth, onSkip, skin }) {
       email, password,
       options: { data: { name } },
     });
-    if (error) { setError(error.message); setLoading(false); return; }
+    if (error) { setError(friendlyAuthError(error.message)); setLoading(false); return; }
     setSent(true);
     setLoading(false);
   }
@@ -8242,7 +8408,7 @@ function AuthScreen({ onAuth, onSkip, skin }) {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: window.location.origin,
     });
-    if (error) { setError(error.message); setLoading(false); return; }
+    if (error) { setError(friendlyAuthError(error.message)); setLoading(false); return; }
     setSent(true);
     setLoading(false);
   }
@@ -8561,6 +8727,7 @@ export default function App() {
   const [event,          setEvent]          = useState(null);
   const [plan,           setPlan]           = useState([]);
   const [selWeek,        setSelWeek]        = useState(null);
+  const [weekPromptMode, setWeekPromptMode] = useState(false); // true only when WeekDetail was auto-opened for "here's your week"
   const [toast,          setToast]          = useState("");
   const [feedbackMap,    setFeedbackMap]    = useState({});
   const [confirmCfg,     setConfirmCfg]     = useState(null);
@@ -8738,6 +8905,26 @@ export default function App() {
     if (profile) setPlan(buildPlan(profile, event, feedbackMap));
     else setPlan([]);
   }, [event, profile, feedbackMap]);
+
+  // Start-of-week prompt: the first time the app opens during a given week,
+  // auto-open that week so the person can glance at it, rearrange anything
+  // that doesn't fit, and batch-add it to their calendar in one go. Only
+  // fires once per week — dismissing (either button) marks it seen so it
+  // doesn't nag on every subsequent open. Doesn't affect manually opening a
+  // week later; that always works, this only controls the automatic pop-up.
+  useEffect(() => {
+    if (!plan.length || selWeek !== null || screen !== "plan") return;
+    const idx = plan.findIndex(w => weekStatus(w.startDate) === "current");
+    if (idx === -1) return;
+    const wk = plan[idx];
+    const seenKey = `bep6_week_prompt_seen_${wk.weekNum}_${wk.startDate}`;
+    let alreadySeen = true;
+    try { alreadySeen = localStorage.getItem(seenKey) === "1"; } catch {}
+    if (alreadySeen) return;
+    setSelWeek(idx);
+    setWeekPromptMode(true);
+    try { localStorage.setItem(seenKey, "1"); } catch {}
+  }, [plan, screen]);
 
   // Show nothing until we know if there's a session (avoids flash)
   if (!authReady) return (
@@ -9499,6 +9686,7 @@ export default function App() {
 
         {selectedWeek && (
           <WeekDetail week={selectedWeek}
+            isWeekStartPrompt={weekPromptMode}
             paces={derivePaces({
               ...profile,
               eventDistanceNum: parseFloat(event?.distance) || 42,
@@ -9511,7 +9699,7 @@ export default function App() {
             feedbackMap={feedbackMap}
             completionMap={completionMap}
             onCompletion={handleCompletion}
-            onClose={() => setSelWeek(null)}/>
+            onClose={() => { setSelWeek(null); setWeekPromptMode(false); }}/>
         )}
 
         <ConfirmDialog
@@ -9543,7 +9731,8 @@ export default function App() {
           display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={() => setShowGoalCelebration(false)}>
           <div style={{background:"var(--white)",borderRadius:"var(--r) var(--r) 0 0",
-            width:"100%",maxWidth:560,padding:"28px var(--pad-x) 40px"}}
+            width:"100%",maxWidth:560,
+            padding:"28px var(--pad-x) max(40px, calc(env(safe-area-inset-bottom) + 20px))"}}
             onClick={e => e.stopPropagation()}>
             <div style={{fontFamily:"var(--display)",fontSize:28,letterSpacing:1,marginBottom:8}}>
               You did it! 🎉
@@ -9582,7 +9771,8 @@ export default function App() {
           display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={() => setShowWhatsNext(false)}>
           <div style={{background:"var(--white)",borderRadius:"var(--r) var(--r) 0 0",
-            width:"100%",maxWidth:560,padding:"28px var(--pad-x) 40px"}}
+            width:"100%",maxWidth:560,
+            padding:"28px var(--pad-x) max(40px, calc(env(safe-area-inset-bottom) + 20px))"}}
             onClick={e => e.stopPropagation()}>
             <div style={{fontFamily:"var(--display)",fontSize:28,letterSpacing:1,marginBottom:8}}>
               Race done! 🎉
