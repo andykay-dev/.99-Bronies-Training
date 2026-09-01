@@ -15,7 +15,7 @@ import {
 import {
   generatePlan, buildSlot,
   normaliseSlot, primarySlot, hasStrength, isWorkoutSlot,
-  parseEditableSession, regenerateFromReps, makeW,
+  parseEditableSession, regenerateEditedSession, makeW,
   DEFAULT_DAY_PLAN, DEFAULT_WORKOUT_MINUTES, WORKOUT_SUBTYPES, PRIORITY,
 } from "@bronies/event-engine";
 
@@ -985,8 +985,10 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
   const [editing, setEditing]       = useState(false);
   const [showMovePanel, setShowMovePanel] = useState(false);
   const [draftDist, setDraftDist]   = useState("");
+  const [draftLabel, setDraftLabel] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
-  const [draftReps, setDraftReps]   = useState(null); // rep-count override (null = not editing reps)
+  const [draftPersonalNote, setDraftPersonalNote] = useState("");
+  const [draftValue, setDraftValue] = useState(null); // rep-count or minutes override (null = not editing)
   const editableInfo = parseEditableSession(session);  // null if not rep-editable
   const day = DAYS.find(d => d.id === dayId);
   const slotMeta = SLOT_TYPES[session?.wtype === "intervals" || session?.wtype === "tempo"
@@ -1017,32 +1019,64 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
   ];
 
   function openEdit() {
-    setDraftDist(session.distance > 0 ? String(session.distance) : "");
+    setDraftDist(!editableInfo && session.distance > 0 ? String(session.distance) : "");
+    setDraftLabel(session.label || "");
     setDraftNotes(session.detail || "");
-    setDraftReps(editableInfo ? editableInfo.reps : null);
+    setDraftPersonalNote(session.personalNote || "");
+    setDraftValue(editableInfo ? editableInfo.value : null);
     setEditing(true);
   }
 
   function saveEdit() {
     const changes = {};
 
-    // Rep override path — for rep-editable sessions. Store rep count; planWithOverrides
-    // will regenerate the whole session (label/summary/detail/distance/estMins + garmin)
-    // by calling the right W.* method with the new rep count.
-    if (editableInfo && draftReps !== null && draftReps !== editableInfo.reps) {
-      const clamped = Math.max(editableInfo.min, Math.min(editableInfo.max, draftReps));
-      changes.repOverride = { kind: editableInfo.kind, reps: clamped, restSec: editableInfo.restSec };
-    } else {
-      // Non-rep distance edit (long runs, easy runs, etc.) — patches distance field only.
+    // Value override path — for rep- or minute-editable sessions. Store the
+    // new value; planWithOverrides will regenerate the whole session
+    // (label/summary/detail/distance/estMins + garmin) by calling the right
+    // W.* method with it.
+    if (editableInfo && draftValue !== null && draftValue !== editableInfo.value) {
+      const clamped = Math.max(editableInfo.min, Math.min(editableInfo.max, draftValue));
+      changes.repOverride = { kind: editableInfo.kind, value: clamped, restSec: editableInfo.restSec };
+    }
+    if (!editableInfo) {
+      // Non-structured distance edit (long runs, easy runs, etc.) — patches distance field only.
       const parsedDist = parseFloat(draftDist);
-      if (!editableInfo && !isNaN(parsedDist) && parsedDist > 0 && parsedDist !== session.distance) {
+      if (!isNaN(parsedDist) && parsedDist > 0 && parsedDist !== session.distance) {
         changes.distance = parsedDist;
         changes.summary = session.summary?.replace(/[\d.]+km/, `${parsedDist}km`) || session.summary;
+        // The Garmin export steps can also embed the distance directly (e.g.
+        // Long Run: "Distance: 18km | Auto Lap every 5km") — without this,
+        // editing distance here would update what you SEE but export a stale
+        // Garmin file with the old number.
+        if (Array.isArray(session.garmin)) {
+          changes.garmin = session.garmin.map(line =>
+            line.replace(/Distance:\s*[\d.]+km/, `Distance: ${parsedDist}km`)
+          );
+        }
       }
+    } else if (session.distanceIsEstimate) {
+      // Manual distance override for estimate-flagged sessions (hills) — layers
+      // on top regardless of whether reps also changed above, since a GPS-measured
+      // distance beats our rough guess either way.
+      const parsedDist = parseFloat(draftDist);
+      if (!isNaN(parsedDist) && parsedDist > 0) {
+        changes.distance = parsedDist;
+        changes.distanceIsEstimate = false; // it's a real measured number now, not a guess
+      }
+    }
+
+    // Name edit — applies on top regardless of whether the session also
+    // regenerated from a rep/minute change above.
+    const trimmedLabel = draftLabel.trim();
+    if (trimmedLabel && trimmedLabel !== session.label) {
+      changes.label = trimmedLabel;
     }
 
     if (draftNotes !== session.detail) {
       changes.detail = draftNotes;
+    }
+    if (draftPersonalNote !== (session.personalNote || "")) {
+      changes.personalNote = draftPersonalNote;
     }
     if (Object.keys(changes).length > 0) {
       onEdit && onEdit(dayId, changes);
@@ -1195,6 +1229,16 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                 <>
                   <p style={{fontSize:13,color:"var(--ink2)",lineHeight:1.75,
                     whiteSpace:"pre-line",marginBottom:12}}>{session.detail}</p>
+
+                  {session.personalNote && (
+                    <div style={{background:"var(--bg)",border:"1px solid var(--rule)",
+                      borderRadius:"var(--r)",padding:"10px 12px",marginBottom:12}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"var(--ink3)",
+                        textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>📝 Your note</div>
+                      <div style={{fontSize:13,color:"var(--ink2)",lineHeight:1.6,
+                        whiteSpace:"pre-line"}}>{session.personalNote}</div>
+                    </div>
+                  )}
 
                   <GarminBlock session={session} paces={paces}/>
 
@@ -1470,40 +1514,74 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                 </>
               ) : (!isRest && editing ? (
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {/* Rep-count editor — for rep-based workouts (intervals/hills) */}
+                  {/* Name — editable for every session type */}
+                  <div>
+                    <label className="lbl">Session name</label>
+                    <input
+                      type="text"
+                      value={draftLabel}
+                      onChange={e => setDraftLabel(e.target.value)}
+                      className="inp"
+                      placeholder={session.label}
+                      style={{fontSize:14}}
+                    />
+                  </div>
+
+                  {/* Value editor — reps for interval/hill workouts, minutes for tempo/fartlek */}
                   {editableInfo ? (
                     <div>
-                      <label className="lbl">Reps — {editableInfo.label}</label>
+                      <label className="lbl">
+                        {editableInfo.unit === "mins" ? "Minutes" : "Reps"} — {editableInfo.label}
+                      </label>
                       <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
                         <button
-                          onClick={() => setDraftReps(r => Math.max(editableInfo.min, (r ?? editableInfo.reps) - 1))}
-                          disabled={(draftReps ?? editableInfo.reps) <= editableInfo.min}
+                          onClick={() => setDraftValue(v => Math.max(editableInfo.min, (v ?? editableInfo.value) - 1))}
+                          disabled={(draftValue ?? editableInfo.value) <= editableInfo.min}
                           style={{width:38,height:38,fontSize:18,fontWeight:700,
                             border:"2px solid var(--rule)",borderRadius:"var(--r)",
-                            background:"var(--white)",cursor:(draftReps ?? editableInfo.reps) <= editableInfo.min ? "not-allowed" : "pointer",
-                            color:"var(--ink)",opacity:(draftReps ?? editableInfo.reps) <= editableInfo.min ? 0.4 : 1}}>
+                            background:"var(--white)",cursor:(draftValue ?? editableInfo.value) <= editableInfo.min ? "not-allowed" : "pointer",
+                            color:"var(--ink)",opacity:(draftValue ?? editableInfo.value) <= editableInfo.min ? 0.4 : 1}}>
                           −
                         </button>
                         <div style={{fontFamily:"var(--mono)",fontSize:26,fontWeight:800,
                           minWidth:54,textAlign:"center",color:"var(--ink)"}}>
-                          {draftReps ?? editableInfo.reps}
+                          {draftValue ?? editableInfo.value}{editableInfo.unit === "mins" ? "m" : ""}
                         </div>
                         <button
-                          onClick={() => setDraftReps(r => Math.min(editableInfo.max, (r ?? editableInfo.reps) + 1))}
-                          disabled={(draftReps ?? editableInfo.reps) >= editableInfo.max}
+                          onClick={() => setDraftValue(v => Math.min(editableInfo.max, (v ?? editableInfo.value) + 1))}
+                          disabled={(draftValue ?? editableInfo.value) >= editableInfo.max}
                           style={{width:38,height:38,fontSize:18,fontWeight:700,
                             border:"2px solid var(--rule)",borderRadius:"var(--r)",
-                            background:"var(--white)",cursor:(draftReps ?? editableInfo.reps) >= editableInfo.max ? "not-allowed" : "pointer",
-                            color:"var(--ink)",opacity:(draftReps ?? editableInfo.reps) >= editableInfo.max ? 0.4 : 1}}>
+                            background:"var(--white)",cursor:(draftValue ?? editableInfo.value) >= editableInfo.max ? "not-allowed" : "pointer",
+                            color:"var(--ink)",opacity:(draftValue ?? editableInfo.value) >= editableInfo.max ? 0.4 : 1}}>
                           +
                         </button>
                         <div style={{fontSize:11,color:"var(--ink4)",flex:1,lineHeight:1.4}}>
-                          Range {editableInfo.min}–{editableInfo.max}.
-                          {(draftReps !== null && draftReps !== editableInfo.reps)
+                          Range {editableInfo.min}–{editableInfo.max}{editableInfo.unit === "mins" ? "min" : ""}.
+                          {(draftValue !== null && draftValue !== editableInfo.value)
                             ? ` Distance, time, and Garmin steps will rebuild.`
                             : ""}
                         </div>
                       </div>
+                      {session.distanceIsEstimate && (
+                        <div style={{marginTop:10}}>
+                          <label className="lbl">
+                            Actual distance (km) <span style={{fontWeight:400,color:"var(--ink4)"}}>— optional, we're only estimating this one</span>
+                          </label>
+                          <input
+                            type="number" step="0.1" min="0.1"
+                            value={draftDist}
+                            onChange={e => setDraftDist(e.target.value)}
+                            className="inp"
+                            placeholder={`~${session.distance}km (estimated)`}
+                            style={{fontFamily:"var(--mono)",fontSize:16,maxWidth:140}}
+                          />
+                          <div style={{fontSize:11,color:"var(--ink4)",marginTop:3}}>
+                            Got the real number from your watch? Pop it in here — hill distance is genuinely
+                            hard to predict, so your GPS beats our guess every time.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : session.distance > 0 ? (
                     <div>
@@ -1524,14 +1602,28 @@ function SessionCard({ dayId, session, onEdit, onDaySlotChange, onSwapDays, pace
                     </div>
                   ) : null}
                   <div>
-                    <label className="lbl">Personal notes (optional)</label>
+                    <label className="lbl">Description</label>
                     <textarea
                       value={draftNotes}
                       onChange={e => setDraftNotes(e.target.value)}
-                      style={{width:"100%",height:90,padding:"8px 10px",fontSize:13,
+                      style={{width:"100%",height:100,padding:"8px 10px",fontSize:13,
                         border:"1.5px solid var(--rule)",borderRadius:"var(--r)",
                         resize:"vertical",fontFamily:"var(--sans)",outline:"none"}}
-                      placeholder="Add your own notes, route, context…"
+                      placeholder="The coaching notes for this session"
+                    />
+                    <div style={{fontSize:10,color:"var(--ink4)",marginTop:3}}>
+                      This is the built-in explanation of the session — edit it if you want to change the wording.
+                    </div>
+                  </div>
+                  <div>
+                    <label className="lbl">Your notes (optional)</label>
+                    <textarea
+                      value={draftPersonalNote}
+                      onChange={e => setDraftPersonalNote(e.target.value)}
+                      style={{width:"100%",height:70,padding:"8px 10px",fontSize:13,
+                        border:"1.5px solid var(--rule)",borderRadius:"var(--r)",
+                        resize:"vertical",fontFamily:"var(--sans)",outline:"none"}}
+                      placeholder="Route, reminders, anything just for you — shown separately, never overwrites the description above"
                     />
                   </div>
                   <div style={{display:"flex",gap:8}}>
@@ -2285,7 +2377,7 @@ function PlanOverview({ plan, profile, event, onSelectWeek, feedbackMap, complet
 //  UI: Day plan picker (used in onboarding)
 //  Each day gets a slot type: workout / easy / long / bronies / rest
 // ─────────────────────────────────────────────────────────────
-function DayPlanPicker({ value, onChange, simplified }) {
+function DayPlanPicker({ value, onChange, simplified, workoutMinutesValue, onWorkoutMinutesChange }) {
   const plan = value || DEFAULT_DAY_PLAN;
   const RUN_TYPES = ["workout", "easy", "long", "bronies", "rest"];
   // Beginner track: "Workout" is meaningless here (the engine has no intensity
@@ -2296,10 +2388,83 @@ function DayPlanPicker({ value, onChange, simplified }) {
     ? ["easy", "long", "parkrun", "bronies", "strength", "rest"]
     : ["workout", "easy", "long", "bronies", "strength", "rest"];
   // For display only — remap "workout" (from carried-over event day plans) to "easy".
-  const displaySlot = k => (simplified && k === "workout") ? "easy" : k;
+  const WORKOUT_SUBTYPE_KEYS = ["tempo", "intervals", "hills", "fartlek"];
+  const displaySlot = k => {
+    if (simplified && k === "workout") return "easy";
+    if (WORKOUT_SUBTYPE_KEYS.includes(k)) return "workout"; // specific subtypes still light up the "Workout" pill
+    return k;
+  };
   // In simplified mode the long slot reads "Long(er)" — it's the growth day,
   // not a capital-L Long Run yet.
   const slotLabel = (k, label) => (simplified && k === "long") ? "Long(er)" : label;
+
+  // Which specific workout subtypes are already assigned to OTHER days this
+  // week — used to grey those out when picking a type for a given day, so
+  // the same session doesn't get planned twice without it being deliberate.
+  function subtypeUsedElsewhere(dayId, subtype) {
+    return DAYS.some(d => {
+      if (d.id === dayId) return false;
+      const other = normaliseSlot(plan[d.id]);
+      return primarySlot(other) === subtype;
+    });
+  }
+  // Three quick samples per type — "what are you wanting to do, and how long
+  // do you have" answered in one tap. Custom minutes still available below.
+  const WORKOUT_SAMPLES = {
+    tempo: [
+      { label: "Quick", desc: "~25min — a solid tempo without eating the whole evening", mins: 25 },
+      { label: "Standard", desc: "~45min — the usual session", mins: 45 },
+      { label: "Go long", desc: "~65min — more sustained work", mins: 65 },
+    ],
+    intervals: [
+      { label: "Sharp & short", desc: "~30min — quick, punchy speed work", mins: 30 },
+      { label: "Standard", desc: "~45min — the classic session", mins: 45 },
+      { label: "Go long", desc: "~65min — more volume, more depth", mins: 65 },
+    ],
+    hills: [
+      { label: "Short & sharp", desc: "~35min — a handful of hard efforts", mins: 35 },
+      { label: "Standard", desc: "~50min — the usual hill day", mins: 50 },
+      { label: "Go long", desc: "~70min — bigger session, more reps", mins: 70 },
+    ],
+    fartlek: [
+      { label: "Quick", desc: "~30min — playful, unstructured speed", mins: 30 },
+      { label: "Standard", desc: "~45min — the usual fartlek", mins: 45 },
+      { label: "Go long", desc: "~60min — a longer play session", mins: 60 },
+    ],
+  };
+  const [promptDay, setPromptDay] = useState(null); // which day is showing the type prompt
+  const [promptCustomMins, setPromptCustomMins] = useState("");
+
+  function applyWorkoutMinutes(dayId, mins) {
+    if (onWorkoutMinutesChange) onWorkoutMinutesChange(dayId, mins);
+  }
+
+  function commitSubtype(dayId, subtype) {
+    const current = normaliseSlot(plan[dayId]);
+    const keepStrength = current.includes("strength");
+    const base = subtype || "workout";
+    const next = keepStrength ? [base, "strength"] : [base];
+    onChange({ ...plan, [dayId]: next.length === 1 ? next[0] : next });
+  }
+
+  function setSubtype(dayId, subtype) {
+    if (subtype === null) {
+      // "Auto" — hand back to the engine's own rotation, no prompt needed.
+      commitSubtype(dayId, null);
+      setPromptDay(null);
+      return;
+    }
+    // Specific type — commit it, then ask what/how-long right away.
+    commitSubtype(dayId, subtype);
+    setPromptCustomMins("");
+    setPromptDay(dayId);
+  }
+
+  function pickSample(dayId, mins) {
+    applyWorkoutMinutes(dayId, mins);
+    setPromptDay(null);
+  }
+
 
   function toggleDay(dayId, key) {
     const current      = normaliseSlot(plan[dayId]);
@@ -2386,6 +2551,81 @@ function DayPlanPicker({ value, onChange, simplified }) {
             {strengthOn && primary !== "rest" && primary !== "strength" && (
               <div style={{padding:"3px 12px 7px 70px",fontSize:10,color:"var(--ink4)",fontStyle:"italic"}}>
                 {SLOT_TYPES[displaySlot(primary)]?.icon} {SLOT_TYPES[displaySlot(primary)]?.label} + 🏋 Strength after your run
+              </div>
+            )}
+            {!simplified && (primary === "workout" || WORKOUT_SUBTYPE_KEYS.includes(primary)) && (
+              <div style={{padding:"3px 12px 9px 70px",display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{fontSize:10,color:"var(--ink4)",marginRight:2}}>Type:</span>
+                <button
+                  onClick={() => setSubtype(d.id, null)}
+                  style={{padding:"3px 8px",fontSize:10,fontWeight:700,borderRadius:12,cursor:"pointer",
+                    border:`1.5px solid ${primary === "workout" ? "var(--accent)" : "var(--rule)"}`,
+                    background: primary === "workout" ? "var(--accent)" : "var(--white)",
+                    color: primary === "workout" ? "white" : "var(--ink4)"}}>
+                  Auto
+                </button>
+                {WORKOUT_SUBTYPE_KEYS.map(st => {
+                  const isActive = primary === st;
+                  const usedElsewhere = !isActive && subtypeUsedElsewhere(d.id, st);
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => !usedElsewhere && setSubtype(d.id, st)}
+                      disabled={usedElsewhere}
+                      title={usedElsewhere ? `Already planned this week — pick a different day to change it` : ""}
+                      style={{padding:"3px 8px",fontSize:10,fontWeight:700,borderRadius:12,
+                        cursor: usedElsewhere ? "not-allowed" : "pointer",
+                        opacity: usedElsewhere ? 0.35 : 1,
+                        border:`1.5px solid ${isActive ? "var(--accent)" : "var(--rule)"}`,
+                        background: isActive ? "var(--accent)" : "var(--white)",
+                        color: isActive ? "white" : "var(--ink4)"}}>
+                      {st.charAt(0).toUpperCase() + st.slice(1)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {promptDay === d.id && WORKOUT_SUBTYPE_KEYS.includes(primary) && (
+              <div style={{margin:"0 12px 12px 12px",padding:"12px",background:"var(--bg)",
+                border:"1px solid var(--rule)",borderRadius:"var(--r)"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"var(--ink)",marginBottom:2}}>
+                  What are you wanting to do, and how long do you have?
+                </div>
+                <div style={{fontSize:10,color:"var(--ink4)",marginBottom:10}}>
+                  Pick whichever's closest, or set your own minutes below.
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+                  {WORKOUT_SAMPLES[primary].map(sample => (
+                    <button key={sample.label}
+                      onClick={() => pickSample(d.id, sample.mins)}
+                      style={{textAlign:"left",padding:"8px 10px",borderRadius:"var(--r)",cursor:"pointer",
+                        border:"1.5px solid var(--rule)",background:"var(--white)"}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"var(--ink)"}}>{sample.label}</div>
+                      <div style={{fontSize:11,color:"var(--ink3)"}}>{sample.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <input type="number" min="10" max="120" step="5"
+                    value={promptCustomMins}
+                    onChange={e => setPromptCustomMins(e.target.value)}
+                    placeholder="Custom mins"
+                    className="inp" style={{maxWidth:110,fontSize:13}}/>
+                  <button
+                    onClick={() => {
+                      const m = parseInt(promptCustomMins, 10);
+                      if (m > 0) pickSample(d.id, m);
+                    }}
+                    disabled={!promptCustomMins || parseInt(promptCustomMins, 10) <= 0}
+                    className="btn btn-o btn-sm">
+                    Set
+                  </button>
+                  <button onClick={() => setPromptDay(null)}
+                    style={{marginLeft:"auto",background:"none",border:"none",cursor:"pointer",
+                      color:"var(--ink4)",fontSize:11}}>
+                    Skip
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -3971,7 +4211,9 @@ function OnboardingWizard({ onComplete, onCancel, initial }) {
               )}
             </div>
           )}
-          <DayPlanPicker value={data.dayPlan} onChange={v => up("dayPlan", v)}/>
+          <DayPlanPicker value={data.dayPlan} onChange={v => up("dayPlan", v)}
+            workoutMinutesValue={data.workoutMinutes}
+            onWorkoutMinutesChange={(dayId, mins) => up("workoutMinutes", { ...(data.workoutMinutes || {}), [dayId]: mins })}/>
         </div>
         );
       })()}
@@ -9160,8 +9402,8 @@ export default function App() {
       // Rep override regenerates the whole session (label/summary/detail/distance/estMins + garmin)
       // by calling the matching W.* method. This is what makes Edit actually rebuild the workout.
       if (overrides.repOverride) {
-        const { kind, reps, restSec } = overrides.repOverride;
-        const rebuilt = regenerateFromReps(W, kind, reps, restSec);
+        const { kind, value, restSec } = overrides.repOverride;
+        const rebuilt = regenerateEditedSession(W, kind, value, restSec);
         if (rebuilt) s = rebuilt;
       }
       // Layer any other field-level overrides (notes, distance for non-rep sessions) on top
@@ -9599,7 +9841,9 @@ export default function App() {
                 <div style={{fontSize:12,color:"var(--ink3)",marginBottom:12,fontStyle:"italic"}}>
                   Life changes — adjust which days you run and what type. Saved as your new default for every week. BRONIES runs are Wed & Fri only.
                 </div>
-                <DayPlanPicker value={profile.dayPlan} onChange={handleDayPlanUpdate}/>
+                <DayPlanPicker value={profile.dayPlan} onChange={handleDayPlanUpdate}
+                  workoutMinutesValue={profile.workoutMinutes}
+                  onWorkoutMinutesChange={handleWorkoutMinutesUpdate}/>
               </div>
             )}
             {!isHangout && (() => {
